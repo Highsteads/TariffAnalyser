@@ -113,25 +113,34 @@ class Plugin(indigo.PluginBase):
     def runTariffComparison(self, valuesDict, typeId):
         errors = indigo.Dict()
 
-        # Parse date range from dialog
-        date_from_str = valuesDict.get("dateFrom", "").strip()
-        date_to_str   = valuesDict.get("dateTo",   "").strip()
+        # Assemble dates from day/month/year dropdowns
+        try:
+            date_from = date(
+                int(valuesDict.get("from_year", "2026")),
+                int(valuesDict.get("from_month", "01")),
+                int(valuesDict.get("from_day",   "01")),
+            )
+        except ValueError as exc:
+            errors["from_day"] = f"Invalid from date: {exc}"
+            return False, valuesDict, errors
 
-        if not date_from_str:
-            days = self._default_days()
-            date_to   = date.today() - timedelta(days=1)
-            date_from = date_to - timedelta(days=days - 1)
-        else:
-            try:
-                date_from = datetime.strptime(date_from_str, "%Y-%m-%d").date()
-                date_to   = datetime.strptime(date_to_str,   "%Y-%m-%d").date()
-            except ValueError:
-                errors["dateFrom"] = "Use YYYY-MM-DD format"
-                return False, valuesDict, errors
+        try:
+            date_to = date(
+                int(valuesDict.get("to_year",  "2026")),
+                int(valuesDict.get("to_month", "05")),
+                int(valuesDict.get("to_day",   "02")),
+            )
+        except ValueError as exc:
+            errors["to_day"] = f"Invalid to date: {exc}"
+            return False, valuesDict, errors
+
+        if date_from > date_to:
+            errors["from_day"] = "From date must be before To date"
+            return False, valuesDict, errors
 
         db_path = self._db_path()
         if not os.path.exists(db_path):
-            errors["dateFrom"] = (
+            errors["from_day"] = (
                 f"Timeseries DB not found at:\n{db_path}\n"
                 f"Check SigenEnergyManager is running v4.6+ and data has been collected."
             )
@@ -150,7 +159,7 @@ class Plugin(indigo.PluginBase):
 
         slots = comparison.get("slots", 0)
         if slots == 0:
-            errors["dateFrom"] = "No data found for this date range."
+            errors["from_day"] = "No data found for this date range."
             return False, valuesDict, errors
 
         export_name = tariff_engine.EXPORT_TARIFFS[self._export_tariff_key()]["name"]
@@ -159,7 +168,7 @@ class Plugin(indigo.PluginBase):
         )
         if err:
             log(f"[Compare] Report generation failed: {err}", level="ERROR")
-            errors["dateFrom"] = f"Report generation failed: {err}"
+            errors["from_day"] = f"Report generation failed: {err}"
             return False, valuesDict, errors
 
         self._last_report_path = path
