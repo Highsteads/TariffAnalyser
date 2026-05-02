@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MenuItems>
+
+    <MenuItem id="runTariffComparison">
+        <Name>Run Tariff Comparison...</Name>
+        <CallbackMethod>runTariffComparison</CallbackMethod>
+        <ButtonTitle>Run Comparison</ButtonTitle>
+        <ConfigUI>
+            <Field id="dateRangeLabel" type="label">
+                <Label>Leave both dates blank to use the default range from preferences.</Label>
+            </Field>
+            <Field id="dateFrom" type="textfield" defaultValue="">
+                <Label>Date from (YYYY-MM-DD)</Label>
+            </Field>
+            <Field id="dateTo" type="textfield" defaultValue="">
+                <Label>Date to   (YYYY-MM-DD)</Label>
+            </Field>
+            <Field id="openInLibreOffice" type="checkbox" defaultValue="true">
+                <Label>Open report in LibreOffice when done</Label>
+            </Field>
+        </ConfigUI>
+    </MenuItem>
+
+    <MenuItem id="exportRawData">
+        <Name>Export Raw Data to CSV</Name>
+        <CallbackMethod>exportRawData</CallbackMethod>
+    </MenuItem>
+
+    <MenuItem id="updatePriceData">
+        <Name>Update Octopus Agile Price Data</Name>
+        <CallbackMethod>updatePriceData</CallbackMethod>
+    </MenuItem>
+
+    <MenuItem id="showDataCoverage">
+        <Name>Show Data Coverage</Name>
+        <CallbackMethod>showDataCoverage</CallbackMethod>
+    </MenuItem>
+
+    <MenuItem id="openLastReport">
+        <Name>Open Last Report in LibreOffice</Name>
+        <CallbackMethod>openLastReport</CallbackMethod>
+    </MenuItem>
+
+    <MenuItem id="sep1" isSeparator="true"/>
+
+    <MenuItem id="showPluginInfo">
+        <Name>Show Plugin Info</Name>
+        <CallbackMethod>showPluginInfo</CallbackMethod>
+    </MenuItem>
+
+</MenuItems>
