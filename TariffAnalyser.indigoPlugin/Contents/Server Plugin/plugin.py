@@ -261,8 +261,7 @@ class Plugin(indigo.PluginBase):
                 "SigenEnergyManager must be running v4.6+ and collect at least one 30-min slot.",
                 level="WARNING")
         else:
-            days_held = (datetime.strptime(latest, "%Y-%m-%dT%H:%M:%S").date() -
-                         datetime.strptime(earliest, "%Y-%m-%dT%H:%M:%S").date()).days + 1
+            days_held = (date.fromisoformat(latest) - date.fromisoformat(earliest)).days + 1
             expected  = days_held * 48
             coverage  = count / expected * 100.0 if expected else 0.0
             log(f"[Coverage] Timeseries: {earliest[:10]} to {latest[:10]}")
