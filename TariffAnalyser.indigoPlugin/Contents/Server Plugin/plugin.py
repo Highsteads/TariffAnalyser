@@ -156,8 +156,8 @@ class Plugin(indigo.PluginBase):
             )
             return False, valuesDict, errors
 
-        earliest_date = datetime.strptime(earliest, "%Y-%m-%dT%H:%M:%S").date()
-        latest_date   = datetime.strptime(latest,   "%Y-%m-%dT%H:%M:%S").date()
+        earliest_date = date.fromisoformat(earliest)
+        latest_date   = date.fromisoformat(latest)
 
         if date_to < earliest_date or date_from > latest_date:
             errors["from_day"] = (
