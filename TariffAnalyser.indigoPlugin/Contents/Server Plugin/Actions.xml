@@ -23,4 +23,9 @@
         <CallbackMethod>actionUpdatePrices</CallbackMethod>
     </Action>
 
+    <Action id="dailyEnergyReport" uiPath="PluginActions">
+        <Name>Generate Daily Energy Summary (yesterday)</Name>
+        <CallbackMethod>actionDailyEnergyReport</CallbackMethod>
+    </Action>
+
 </Actions>

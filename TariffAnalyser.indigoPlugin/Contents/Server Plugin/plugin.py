@@ -306,6 +306,66 @@ class Plugin(indigo.PluginBase):
             log("[Report] No report found. Run a tariff comparison first.", level="WARNING")
 
     # ================================================================
+    # Menu: Daily Energy Summary (opens dialog)
+    # ================================================================
+
+    def dailyEnergyReport(self, valuesDict, typeId):
+        errors = indigo.Dict()
+
+        try:
+            report_date = date(
+                int(valuesDict.get("rpt_year",  "2026")),
+                int(valuesDict.get("rpt_month", "05")),
+                int(valuesDict.get("rpt_day",   "01")),
+            )
+        except ValueError as exc:
+            errors["rpt_day"] = f"Invalid date: {exc}"
+            return False, valuesDict, errors
+
+        if report_date > date.today():
+            errors["rpt_day"] = "Date cannot be in the future."
+            return False, valuesDict, errors
+
+        db_path = self._db_path()
+        if not os.path.exists(db_path):
+            errors["rpt_day"] = "Timeseries DB not found. Check SigenEnergyManager is running v4.6+."
+            return False, valuesDict, errors
+
+        log(f"[Daily] Generating report for {report_date.strftime('%d/%m/%Y')}")
+        path, err = report_generator.generate_daily_report(
+            db_path, report_date, self._output_dir(),
+            export_rate_p=12.0, log_fn=log,
+        )
+        if err:
+            errors["rpt_day"] = err
+            return False, valuesDict, errors
+
+        self._last_report_path = path
+        if valuesDict.get("rptOpenInBrowser", True):
+            report_generator.open_in_browser(path, log_fn=log)
+
+        return True, valuesDict, errors
+
+    def actionDailyEnergyReport(self, action):
+        """Action: generate daily report for yesterday. Schedulable."""
+        report_date = date.today() - timedelta(days=1)
+        db_path     = self._db_path()
+        if not os.path.exists(db_path):
+            log("[Daily] Timeseries DB not found — skipping.", level="WARNING")
+            return
+
+        log(f"[Daily] Generating scheduled report for {report_date.strftime('%d/%m/%Y')}")
+        path, err = report_generator.generate_daily_report(
+            db_path, report_date, self._output_dir(),
+            export_rate_p=12.0, log_fn=log,
+        )
+        if err:
+            log(f"[Daily] Report failed: {err}", level="ERROR")
+        else:
+            self._last_report_path = path
+            log(f"[Daily] Report saved: {path}")
+
+    # ================================================================
     # Menu: Show Plugin Info
     # ================================================================
 
