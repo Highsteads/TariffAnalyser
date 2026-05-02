@@ -168,6 +168,7 @@ class Plugin(indigo.PluginBase):
             )
             return False, valuesDict, errors
 
+        self._ensure_agile_prices(date_from, date_to)
         log(f"[Compare] Running comparison {date_from} to {date_to}")
 
         comparison = tariff_engine.run_comparison(
@@ -306,30 +307,47 @@ class Plugin(indigo.PluginBase):
             log("[Report] No report found. Run a tariff comparison first.", level="WARNING")
 
     # ================================================================
+    # Dynamic menu list — last 60 days for daily report picker
+    # ================================================================
+
+    def buildDayList(self, filter="", valuesDict=None, typeId="", targetId=0):
+        today  = date.today()
+        result = []
+        for i in range(60):
+            d = today - timedelta(days=i)
+            if i == 0:
+                label = f"Today — {d.strftime('%A, %-d %B %Y')}"
+            elif i == 1:
+                label = f"Yesterday — {d.strftime('%A, %-d %B %Y')}"
+            else:
+                label = d.strftime("%-d %B %Y")
+            result.append((d.isoformat(), label))
+        return result
+
+    # ================================================================
     # Menu: Daily Energy Summary (opens dialog)
     # ================================================================
 
     def dailyEnergyReport(self, valuesDict, typeId):
         errors = indigo.Dict()
 
+        rpt_date_str = valuesDict.get("rpt_date", date.today().isoformat())
         try:
-            report_date = date(
-                int(valuesDict.get("rpt_year",  "2026")),
-                int(valuesDict.get("rpt_month", "05")),
-                int(valuesDict.get("rpt_day",   "01")),
-            )
+            report_date = date.fromisoformat(rpt_date_str)
         except ValueError as exc:
-            errors["rpt_day"] = f"Invalid date: {exc}"
+            errors["rpt_date"] = f"Invalid date: {exc}"
             return False, valuesDict, errors
 
         if report_date > date.today():
-            errors["rpt_day"] = "Date cannot be in the future."
+            errors["rpt_date"] = "Date cannot be in the future."
             return False, valuesDict, errors
 
         db_path = self._db_path()
         if not os.path.exists(db_path):
-            errors["rpt_day"] = "Timeseries DB not found. Check SigenEnergyManager is running v4.6+."
+            errors["rpt_date"] = "Timeseries DB not found. Check SigenEnergyManager is running v4.6+."
             return False, valuesDict, errors
+
+        self._ensure_agile_prices(report_date, report_date)
 
         log(f"[Daily] Generating report for {report_date.strftime('%d/%m/%Y')}")
         path, err = report_generator.generate_daily_report(
@@ -337,7 +355,7 @@ class Plugin(indigo.PluginBase):
             export_rate_p=12.0, log_fn=log,
         )
         if err:
-            errors["rpt_day"] = err
+            errors["rpt_date"] = err
             return False, valuesDict, errors
 
         self._last_report_path = path
@@ -369,6 +387,18 @@ class Plugin(indigo.PluginBase):
     # Menu: Period reports (weekly / monthly / yearly / custom)
     # ================================================================
 
+    def _ensure_agile_prices(self, date_from, date_to):
+        """Silently fetch any missing Agile price slots for the date range."""
+        try:
+            imp, exp = octopus_prices.fetch_agile_prices(
+                self._agile_db_path(), self._region(),
+                date_from, date_to, log_fn=log,
+            )
+            if imp or exp:
+                log(f"[Prices] Auto-fetched: +{imp} import, +{exp} export slots")
+        except Exception as exc:
+            log(f"[Prices] Auto-fetch failed (non-fatal): {exc}", level="WARNING")
+
     def _period_report(self, date_from, date_to, label):
         """Shared logic for all period report menu callbacks."""
         errors  = indigo.Dict()
@@ -377,6 +407,7 @@ class Plugin(indigo.PluginBase):
             errors["rpt_day"] = "Timeseries DB not found. Check SigenEnergyManager v4.6+."
             return False, errors
 
+        self._ensure_agile_prices(date_from, date_to)
         log(f"[Period] {label}: {date_from.strftime('%d/%m/%Y')} to {date_to.strftime('%d/%m/%Y')}")
         path, err = report_generator.generate_period_report(
             db_path, date_from, date_to, label,
