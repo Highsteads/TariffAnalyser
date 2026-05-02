@@ -82,7 +82,8 @@ class Plugin(indigo.PluginBase):
     # ================================================================
 
     def _db_path(self):
-        return self.pluginPrefs.get("dbPath", DEFAULT_DB_PATH)
+        configured = self.pluginPrefs.get("dbPath", "").strip()
+        return configured if configured else DEFAULT_DB_PATH
 
     def _agile_db_path(self):
         prefs_dir = indigo.server.getInstallFolderPath()
