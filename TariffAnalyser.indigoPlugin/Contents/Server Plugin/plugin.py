@@ -142,8 +142,29 @@ class Plugin(indigo.PluginBase):
         db_path = self._db_path()
         if not os.path.exists(db_path):
             errors["from_day"] = (
-                f"Timeseries DB not found at:\n{db_path}\n"
+                f"Timeseries DB not found. "
                 f"Check SigenEnergyManager is running v4.6+ and data has been collected."
+            )
+            return False, valuesDict, errors
+
+        # Check coverage so the error message can tell the user what dates are available
+        earliest, latest, total_slots = tariff_engine.get_coverage(db_path)
+        if not earliest:
+            errors["from_day"] = (
+                "No data in the timeseries DB yet. "
+                "SigenEnergyManager v4.6+ must run for at least one 30-min cycle first."
+            )
+            return False, valuesDict, errors
+
+        earliest_date = datetime.strptime(earliest, "%Y-%m-%dT%H:%M:%S").date()
+        latest_date   = datetime.strptime(latest,   "%Y-%m-%dT%H:%M:%S").date()
+
+        if date_to < earliest_date or date_from > latest_date:
+            errors["from_day"] = (
+                f"No data for that date range. "
+                f"Available data: {earliest_date.strftime('%d/%m/%Y')} "
+                f"to {latest_date.strftime('%d/%m/%Y')} "
+                f"({total_slots} slots)."
             )
             return False, valuesDict, errors
 
@@ -160,7 +181,10 @@ class Plugin(indigo.PluginBase):
 
         slots = comparison.get("slots", 0)
         if slots == 0:
-            errors["from_day"] = "No data found for this date range."
+            errors["from_day"] = (
+                f"No data for {date_from.strftime('%d/%m/%Y')} to {date_to.strftime('%d/%m/%Y')}. "
+                f"Available: {earliest_date.strftime('%d/%m/%Y')} to {latest_date.strftime('%d/%m/%Y')}."
+            )
             return False, valuesDict, errors
 
         export_name = tariff_engine.EXPORT_TARIFFS[self._export_tariff_key()]["name"]
