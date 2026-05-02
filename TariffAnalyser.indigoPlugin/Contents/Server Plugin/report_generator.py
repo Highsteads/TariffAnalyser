@@ -10,7 +10,7 @@
 import csv
 import os
 import subprocess
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 
 def generate_report(comparison, date_from, date_to, output_dir, export_tariff_name):
@@ -562,7 +562,6 @@ def generate_period_report(db_path, date_from, date_to, period_label,
     Returns (path, error_string).
     """
     import sqlite3
-    from datetime import timedelta as _td
 
     def _log(msg, level="INFO"):
         if log_fn:
@@ -587,7 +586,7 @@ def generate_period_report(db_path, date_from, date_to, period_label,
                GROUP BY day
                ORDER BY day""",
             (f"{date_from.isoformat()}T00:00:00",
-             f"{(date_to + _td(days=1)).isoformat()}T00:00:00"),
+             f"{(date_to + timedelta(days=1)).isoformat()}T00:00:00"),
         ).fetchall()
         con.close()
     except Exception as exc:
