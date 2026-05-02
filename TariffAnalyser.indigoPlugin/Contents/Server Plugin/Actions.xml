@@ -28,4 +28,19 @@
         <CallbackMethod>actionDailyEnergyReport</CallbackMethod>
     </Action>
 
+    <Action id="weeklyEnergyReport" uiPath="PluginActions">
+        <Name>Generate Weekly Energy Summary (last 7 days)</Name>
+        <CallbackMethod>actionWeeklyEnergyReport</CallbackMethod>
+    </Action>
+
+    <Action id="monthlyEnergyReport" uiPath="PluginActions">
+        <Name>Generate Monthly Energy Summary (last calendar month)</Name>
+        <CallbackMethod>actionMonthlyEnergyReport</CallbackMethod>
+    </Action>
+
+    <Action id="yearlyEnergyReport" uiPath="PluginActions">
+        <Name>Generate Yearly Energy Summary (last calendar year)</Name>
+        <CallbackMethod>actionYearlyEnergyReport</CallbackMethod>
+    </Action>
+
 </Actions>

@@ -366,6 +366,120 @@ class Plugin(indigo.PluginBase):
             log(f"[Daily] Report saved: {path}")
 
     # ================================================================
+    # Menu: Period reports (weekly / monthly / yearly / custom)
+    # ================================================================
+
+    def _period_report(self, date_from, date_to, label):
+        """Shared logic for all period report menu callbacks."""
+        errors  = indigo.Dict()
+        db_path = self._db_path()
+        if not os.path.exists(db_path):
+            errors["rpt_day"] = "Timeseries DB not found. Check SigenEnergyManager v4.6+."
+            return False, errors
+
+        log(f"[Period] {label}: {date_from.strftime('%d/%m/%Y')} to {date_to.strftime('%d/%m/%Y')}")
+        path, err = report_generator.generate_period_report(
+            db_path, date_from, date_to, label,
+            self._output_dir(), export_rate_p=12.0, log_fn=log,
+        )
+        if err:
+            errors["rpt_day"] = err
+            return False, errors
+
+        self._last_report_path = path
+        report_generator.open_in_browser(path, log_fn=log)
+        return True, errors
+
+    def weeklyEnergyReport(self, valuesDict, typeId):
+        errors = indigo.Dict()
+        try:
+            date_from = date(
+                int(valuesDict.get("rpt_year", "2026")),
+                int(valuesDict.get("rpt_month", "05")),
+                int(valuesDict.get("rpt_day",   "01")),
+            )
+        except ValueError as exc:
+            errors["rpt_day"] = f"Invalid date: {exc}"
+            return False, valuesDict, errors
+        date_to = date_from + timedelta(days=6)
+        ok, errors = self._period_report(date_from, date_to, "Weekly")
+        return ok, valuesDict, errors
+
+    def monthlyEnergyReport(self, valuesDict, typeId):
+        errors = indigo.Dict()
+        import calendar
+        try:
+            year  = int(valuesDict.get("rpt_year",  "2026"))
+            month = int(valuesDict.get("rpt_month", "05"))
+            date_from = date(year, month, 1)
+            last_day  = calendar.monthrange(year, month)[1]
+            date_to   = date(year, month, last_day)
+        except ValueError as exc:
+            errors["rpt_month"] = f"Invalid date: {exc}"
+            return False, valuesDict, errors
+        ok, errors = self._period_report(date_from, date_to, "Monthly")
+        return ok, valuesDict, errors
+
+    def yearlyEnergyReport(self, valuesDict, typeId):
+        errors = indigo.Dict()
+        try:
+            year      = int(valuesDict.get("rpt_year", "2026"))
+            date_from = date(year, 1, 1)
+            date_to   = date(year, 12, 31)
+        except ValueError as exc:
+            errors["rpt_year"] = f"Invalid year: {exc}"
+            return False, valuesDict, errors
+        ok, errors = self._period_report(date_from, date_to, "Yearly")
+        return ok, valuesDict, errors
+
+    def customPeriodReport(self, valuesDict, typeId):
+        errors = indigo.Dict()
+        try:
+            date_from = date(
+                int(valuesDict.get("from_year",  "2026")),
+                int(valuesDict.get("from_month", "04")),
+                int(valuesDict.get("from_day",   "01")),
+            )
+        except ValueError as exc:
+            errors["from_day"] = f"Invalid from date: {exc}"
+            return False, valuesDict, errors
+        try:
+            date_to = date(
+                int(valuesDict.get("to_year",  "2026")),
+                int(valuesDict.get("to_month", "05")),
+                int(valuesDict.get("to_day",   "02")),
+            )
+        except ValueError as exc:
+            errors["to_day"] = f"Invalid to date: {exc}"
+            return False, valuesDict, errors
+        if date_from > date_to:
+            errors["from_day"] = "From date must be before To date."
+            return False, valuesDict, errors
+        ok, errors = self._period_report(date_from, date_to, "Custom Period")
+        return ok, valuesDict, errors
+
+    def actionWeeklyEnergyReport(self, action):
+        """Action: last 7 complete days. Schedulable."""
+        today     = date.today()
+        date_to   = today - timedelta(days=1)
+        date_from = date_to - timedelta(days=6)
+        self._period_report(date_from, date_to, "Weekly")
+
+    def actionMonthlyEnergyReport(self, action):
+        """Action: last complete calendar month. Schedulable."""
+        import calendar
+        today      = date.today()
+        first_this = today.replace(day=1)
+        date_to    = first_this - timedelta(days=1)
+        date_from  = date_to.replace(day=1)
+        self._period_report(date_from, date_to, "Monthly")
+
+    def actionYearlyEnergyReport(self, action):
+        """Action: last complete calendar year. Schedulable."""
+        last_year = date.today().year - 1
+        self._period_report(date(last_year, 1, 1), date(last_year, 12, 31), "Yearly")
+
+    # ================================================================
     # Menu: Show Plugin Info
     # ================================================================
 
