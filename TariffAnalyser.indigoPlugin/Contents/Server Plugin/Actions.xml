@@ -43,4 +43,26 @@
         <CallbackMethod>actionYearlyEnergyReport</CallbackMethod>
     </Action>
 
+    <Action id="updateDailySummary" uiPath="PluginActions">
+        <Name>Update Daily Energy Summary</Name>
+        <CallbackMethod>actionUpdateDailySummary</CallbackMethod>
+        <ConfigUI>
+            <Field id="rollingDays" type="menu" defaultValue="7">
+                <Label>Days to refresh</Label>
+                <List>
+                    <Option value="1">Yesterday only</Option>
+                    <Option value="3">Last 3 days</Option>
+                    <Option value="7">Last 7 days (recommended)</Option>
+                    <Option value="14">Last 14 days</Option>
+                    <Option value="30">Last 30 days</Option>
+                </List>
+            </Field>
+        </ConfigUI>
+    </Action>
+
+    <Action id="openEnergyDashboard" uiPath="PluginActions">
+        <Name>Open Energy Dashboard</Name>
+        <CallbackMethod>actionOpenEnergyDashboard</CallbackMethod>
+    </Action>
+
 </Actions>

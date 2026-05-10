@@ -317,6 +317,21 @@
         <CallbackMethod>savingsSummary</CallbackMethod>
     </MenuItem>
 
+    <MenuItem id="openEnergyDashboard">
+        <Name>Open Energy Dashboard</Name>
+        <CallbackMethod>openEnergyDashboard</CallbackMethod>
+    </MenuItem>
+
+    <MenuItem id="updateDailySummaryNow">
+        <Name>Update Daily Summary Now (last 7 days)</Name>
+        <CallbackMethod>updateDailySummaryNow</CallbackMethod>
+    </MenuItem>
+
+    <MenuItem id="runBackfill">
+        <Name>Run Energy History Backfill (one-off)</Name>
+        <CallbackMethod>runBackfill</CallbackMethod>
+    </MenuItem>
+
     <MenuItem id="exportRawData">
         <Name>Export Raw Data to CSV</Name>
         <CallbackMethod>exportRawData</CallbackMethod>

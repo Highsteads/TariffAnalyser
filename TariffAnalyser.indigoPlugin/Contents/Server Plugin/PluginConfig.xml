@@ -57,6 +57,11 @@
         </List>
     </Field>
 
+    <Field id="gasUnitRateP" type="textfield" defaultValue="6.09">
+        <Label>Gas unit rate (pence/kWh)</Label>
+        <Description>Used for daily_summary gas cost calculations. Update if your rate changes.</Description>
+    </Field>
+
     <Field id="defaultDays" type="menu" defaultValue="30">
         <Label>Default report date range</Label>
         <List>

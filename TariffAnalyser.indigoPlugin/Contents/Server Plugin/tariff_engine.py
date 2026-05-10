@@ -63,6 +63,18 @@ IMPORT_TARIFFS = {
         "shoulder_p":        26.0,
         "standing_p_day":    53.35,
     },
+    "flux": {
+        "name":              "Octopus Flux",
+        "type":              "tou_multi",
+        "slots": [
+            {"start": "02:00", "end": "05:00", "rate_p": 7.01},   # off-peak
+        ],
+        "peak_start":        "16:00",
+        "peak_end":          "19:00",
+        "peak_p":            33.00,
+        "shoulder_p":        21.00,
+        "standing_p_day":    53.35,
+    },
     "economy7": {
         "name":              "Economy 7 (typical)",
         "type":              "tou",
