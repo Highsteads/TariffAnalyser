@@ -267,14 +267,54 @@
         <CallbackMethod>dailyEnergyReport</CallbackMethod>
         <ButtonTitle>Generate Report</ButtonTitle>
         <ConfigUI>
-            <Field id="rpt_date" type="menu">
-                <Label>Report date</Label>
-                <List class="self" method="buildDayList" dynamicReload="true"/>
+            <Field id="dateLabel" type="label">
+                <Label>Select date</Label>
+            </Field>
+            <Field id="rpt_day" type="menu" defaultValue="01">
+                <Label>Day</Label>
+                <List>
+                    <Option value="01">01</Option><Option value="02">02</Option><Option value="03">03</Option>
+                    <Option value="04">04</Option><Option value="05">05</Option><Option value="06">06</Option>
+                    <Option value="07">07</Option><Option value="08">08</Option><Option value="09">09</Option>
+                    <Option value="10">10</Option><Option value="11">11</Option><Option value="12">12</Option>
+                    <Option value="13">13</Option><Option value="14">14</Option><Option value="15">15</Option>
+                    <Option value="16">16</Option><Option value="17">17</Option><Option value="18">18</Option>
+                    <Option value="19">19</Option><Option value="20">20</Option><Option value="21">21</Option>
+                    <Option value="22">22</Option><Option value="23">23</Option><Option value="24">24</Option>
+                    <Option value="25">25</Option><Option value="26">26</Option><Option value="27">27</Option>
+                    <Option value="28">28</Option><Option value="29">29</Option><Option value="30">30</Option>
+                    <Option value="31">31</Option>
+                </List>
+            </Field>
+            <Field id="rpt_month" type="menu" defaultValue="01">
+                <Label>Month</Label>
+                <List>
+                    <Option value="01">January</Option><Option value="02">February</Option>
+                    <Option value="03">March</Option><Option value="04">April</Option>
+                    <Option value="05">May</Option><Option value="06">June</Option>
+                    <Option value="07">July</Option><Option value="08">August</Option>
+                    <Option value="09">September</Option><Option value="10">October</Option>
+                    <Option value="11">November</Option><Option value="12">December</Option>
+                </List>
+            </Field>
+            <Field id="rpt_year" type="menu" defaultValue="2026">
+                <Label>Year</Label>
+                <List>
+                    <Option value="2024">2024</Option>
+                    <Option value="2025">2025</Option>
+                    <Option value="2026">2026</Option>
+                    <Option value="2027">2027</Option>
+                </List>
             </Field>
             <Field id="rptOpenInBrowser" type="checkbox" defaultValue="true">
                 <Label>Open in browser when done</Label>
             </Field>
         </ConfigUI>
+    </MenuItem>
+
+    <MenuItem id="savingsSummary">
+        <Name>Solar Savings Summary</Name>
+        <CallbackMethod>savingsSummary</CallbackMethod>
     </MenuItem>
 
     <MenuItem id="exportRawData">

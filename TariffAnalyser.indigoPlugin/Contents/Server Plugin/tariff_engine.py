@@ -315,6 +315,84 @@ def run_comparison(
     }
 
 
+def calculate_savings(db_path, export_rate_p, date_from, date_to):
+    """Calculate solar savings for a date range against the actual Tracker tariff.
+
+    Savings = what you would have paid without solar − what you actually paid.
+    - Avoided import: solar/battery energy used at home × Tracker rate per slot
+    - Export revenue: grid export × flat export rate
+    Falls back to Ofgem cap (24.5p) for slots with no Tracker price.
+
+    Returns a dict:
+        pv_kwh             total solar generated (kWh)
+        pv_to_home_kwh     solar used at home, not exported (kWh)
+        export_kwh         total exported (kWh)
+        home_kwh           total home consumption (kWh)
+        grid_import_kwh    total grid import (kWh)
+        avoided_import_p   pence saved by using own solar instead of buying
+        export_revenue_p   pence earned from exporting
+        total_savings_p    total savings in pence
+        cost_with_solar_p  actual energy cost (import cost − export revenue)
+        cost_without_solar_p  what the bill would have been with no solar
+        slots              number of slots processed
+    """
+    _OFGEM_FALLBACK_P = 24.5  # pence/kWh when Tracker price missing
+
+    rows = _load_timeseries(db_path, date_from, date_to)
+    if not rows:
+        return {
+            "pv_kwh": 0.0, "pv_to_home_kwh": 0.0, "export_kwh": 0.0,
+            "home_kwh": 0.0, "grid_import_kwh": 0.0,
+            "avoided_import_p": 0.0, "export_revenue_p": 0.0,
+            "total_savings_p": 0.0, "cost_with_solar_p": 0.0,
+            "cost_without_solar_p": 0.0, "slots": 0,
+        }
+
+    avoided_p      = 0.0
+    export_rev_p   = 0.0
+    cost_actual_p  = 0.0
+    cost_no_solar_p = 0.0
+    total_pv       = 0.0
+    total_exp      = 0.0
+    total_home     = 0.0
+    total_imp      = 0.0
+
+    for row in rows:
+        imp_kwh  = row[2] or 0.0
+        exp_kwh  = row[3] or 0.0
+        pv_kwh   = row[4] or 0.0
+        home_kwh = row[5] or 0.0
+        rate_p   = row[9] or _OFGEM_FALLBACK_P
+
+        # Energy met by solar/battery rather than the grid
+        solar_at_home = max(0.0, home_kwh - imp_kwh)
+        slot_exp_rev  = exp_kwh * export_rate_p
+
+        avoided_p      += solar_at_home * rate_p
+        export_rev_p   += slot_exp_rev
+        cost_actual_p  += imp_kwh * rate_p - slot_exp_rev
+        cost_no_solar_p += home_kwh * rate_p
+
+        total_pv  += pv_kwh
+        total_exp += exp_kwh
+        total_home += home_kwh
+        total_imp  += imp_kwh
+
+    return {
+        "pv_kwh":              round(total_pv,          3),
+        "pv_to_home_kwh":      round(total_pv - total_exp, 3),
+        "export_kwh":          round(total_exp,         3),
+        "home_kwh":            round(total_home,        3),
+        "grid_import_kwh":     round(total_imp,         3),
+        "avoided_import_p":    round(avoided_p,         2),
+        "export_revenue_p":    round(export_rev_p,      2),
+        "total_savings_p":     round(avoided_p + export_rev_p, 2),
+        "cost_with_solar_p":   round(cost_actual_p,     2),
+        "cost_without_solar_p": round(cost_no_solar_p,  2),
+        "slots":               len(rows),
+    }
+
+
 def get_coverage(timeseries_db_path):
     """Return (earliest_date, latest_date, total_slots) from the DB."""
     try:

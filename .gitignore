@@ -1,7 +1,12 @@
 secrets.py
+IndigoSecrets.py
 **/secrets.py
+**/IndigoSecrets.py
 __pycache__/
 *.pyc
 *.pyo
 .DS_Store
 Contents/Packages/
+
+# Claude Code context file — local only
+CLAUDE.md

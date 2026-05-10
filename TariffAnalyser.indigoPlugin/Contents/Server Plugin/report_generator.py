@@ -11,6 +11,7 @@ import csv
 import os
 import subprocess
 from datetime import date, datetime, timedelta
+import tariff_engine
 
 
 def generate_report(comparison, date_from, date_to, output_dir, export_tariff_name):
@@ -243,6 +244,16 @@ def generate_daily_report(db_path, report_date, output_dir, export_rate_p=12.0, 
     net_cost_p    = import_cost_p - export_rev_p
     self_suff     = max(0.0, (1.0 - total_imp / total_home) * 100.0) if total_home > 0 else 100.0
 
+    # Solar savings: what we would have paid without solar vs what we actually paid
+    _OFGEM_FALLBACK_P = 24.5
+    avoided_import_p  = sum(
+        max(0.0, (r[5] or 0.0) - (r[2] or 0.0)) * (r[9] or _OFGEM_FALLBACK_P)
+        for r in rows
+    )
+    total_savings_p   = avoided_import_p + export_rev_p
+    cost_no_solar_p   = sum((r[5] or 0.0) * (r[9] or _OFGEM_FALLBACK_P) for r in rows)
+    pv_to_home        = max(0.0, total_pv - total_exp)
+
     slot_count   = len(rows)
     expected_48  = 48
     completeness = slot_count / expected_48 * 100.0
@@ -352,6 +363,25 @@ def generate_daily_report(db_path, report_date, output_dir, export_rate_p=12.0, 
         + f'<div class="crow"><span>Peak solar slot</span><span>{peak_str}</span></div>'
     )
 
+    # ------------------------------------------------------------------ savings block
+    self_cons_pct = (pv_to_home / total_pv * 100.0) if total_pv >= 0.01 else 0.0
+    savings_html = (
+        f'<div class="crow"><span>Without solar (estimate)</span>'
+        f'<span class="imp">£{cost_no_solar_p/100:.2f}</span></div>'
+        + f'<div class="crow"><span>Actual cost (with solar)</span>'
+        f'<span>£{max(0, net_cost_p)/100:.2f}</span></div>'
+        + f'<div class="crow divider"></div>'
+        + f'<div class="crow"><span>Solar used at home</span>'
+        f'<span class="pv">{pv_to_home:.2f} kWh ({self_cons_pct:.0f}%)</span></div>'
+        + f'<div class="crow"><span>Avoided import cost</span>'
+        f'<span class="exp">£{avoided_import_p/100:.2f}</span></div>'
+        + f'<div class="crow"><span>Export revenue</span>'
+        f'<span class="exp">£{export_rev_p/100:.2f}</span></div>'
+        + f'<div class="crow divider"></div>'
+        + f'<div class="crow"><span><strong>Total saved today</strong></span>'
+        f'<strong class="exp">£{total_savings_p/100:.2f}</strong></div>'
+    )
+
     # ------------------------------------------------------------------ battery block
     soc_s = soc_start or 0
     soc_e = soc_end   or 0
@@ -408,8 +438,8 @@ def generate_daily_report(db_path, report_date, output_dir, export_rate_p=12.0, 
   .card.imp  .card-value {{ color: #b71c1c; }}
   .card.exp  .card-value {{ color: #1b5e20; }}
 
-  /* Two-column panel */
-  .panels {{ display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0; }}
+  /* Three-column panel */
+  .panels {{ display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin: 10px 0; }}
   .panel {{ background: #fff; border-radius: 8px; padding: 18px 20px;
             box-shadow: 0 1px 4px rgba(0,0,0,.08); }}
   .panel h2 {{ font-size: 0.78em; font-weight: 600; color: #777;
@@ -482,6 +512,10 @@ def generate_daily_report(db_path, report_date, output_dir, export_rate_p=12.0, 
     <div class="panel">
       <h2>Battery</h2>
       {battery_html}
+    </div>
+    <div class="panel">
+      <h2>Solar Savings</h2>
+      {savings_html}
     </div>
   </div>
 
@@ -870,6 +904,195 @@ def generate_period_report(db_path, date_from, date_to, period_label,
         return None, str(exc)
 
     _log(f"[Period] Report written: {path}")
+    return path, None
+
+
+def generate_savings_summary(db_path, output_dir, export_rate_p=12.0, log_fn=None):
+    """Generate a standalone HTML page showing solar savings for today, this
+    week, this month, this year, and all time.
+
+    Returns (path, error_string).
+    """
+    import calendar as _cal
+
+    def _log(msg, level="INFO"):
+        if log_fn:
+            log_fn(msg, level=level)
+
+    today      = date.today()
+    # Period boundaries
+    week_start = today - timedelta(days=6)           # last 7 days incl. today
+    month_start = today.replace(day=1)
+    year_start  = today.replace(month=1, day=1)
+
+    periods = [
+        ("Today",       today,       today),
+        ("This week",   week_start,  today),
+        ("This month",  month_start, today),
+        ("This year",   year_start,  today),
+    ]
+
+    sections = []
+    for label, d_from, d_to in periods:
+        s = tariff_engine.calculate_savings(db_path, export_rate_p, d_from, d_to)
+        if s["slots"] == 0:
+            sections.append((label, d_from, d_to, None))
+        else:
+            sections.append((label, d_from, d_to, s))
+
+    generated_at = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    def fmt_gbp(p):
+        return f"£{p/100:.2f}"
+
+    def savings_block(label, d_from, d_to, s):
+        if s is None:
+            return f"""
+        <div class="period-card">
+          <div class="period-header">{label}</div>
+          <div class="period-dates">{d_from.strftime('%-d %b')} – {d_to.strftime('%-d %b %Y')}</div>
+          <div class="no-data">No data available</div>
+        </div>"""
+
+        self_cons   = (s["pv_to_home_kwh"] / s["pv_kwh"] * 100) if s["pv_kwh"] >= 0.01 else 0.0
+        days_span   = (d_to - d_from).days + 1
+        actual_days = max(1.0, s["slots"] / 48.0)   # real days with data, not calendar span
+        daily_avg   = s["total_savings_p"] / actual_days
+        annual_proj = daily_avg * 365
+        data_note   = (f"based on {actual_days:.0f} day{'s' if actual_days != 1 else ''} of data"
+                       if actual_days < days_span else "")
+
+        return f"""
+        <div class="period-card">
+          <div class="period-header">{label}</div>
+          <div class="period-dates">{d_from.strftime('%-d %b')} – {d_to.strftime('%-d %b %Y')}</div>
+          <div class="saving-total">{fmt_gbp(s['total_savings_p'])}</div>
+          <div class="saving-label">total saved</div>
+          <div class="breakdown">
+            <div class="brow">
+              <span>Solar generated</span>
+              <span class="pv">{s['pv_kwh']:.1f} kWh</span>
+            </div>
+            <div class="brow">
+              <span>Used at home</span>
+              <span class="pv">{s['pv_to_home_kwh']:.1f} kWh ({self_cons:.0f}%)</span>
+            </div>
+            <div class="brow">
+              <span>Exported</span>
+              <span class="exp">{s['export_kwh']:.1f} kWh</span>
+            </div>
+            <div class="brow divider"></div>
+            <div class="brow">
+              <span>Avoided import</span>
+              <span class="exp">{fmt_gbp(s['avoided_import_p'])}</span>
+            </div>
+            <div class="brow">
+              <span>Export revenue</span>
+              <span class="exp">{fmt_gbp(s['export_revenue_p'])}</span>
+            </div>
+            <div class="brow divider"></div>
+            <div class="brow">
+              <span>Would have paid</span>
+              <span class="imp">{fmt_gbp(s['cost_without_solar_p'])}</span>
+            </div>
+            <div class="brow">
+              <span>Actually paid</span>
+              <span>{fmt_gbp(max(0, s['cost_with_solar_p']))}</span>
+            </div>
+            <div class="brow divider"></div>
+            <div class="brow">
+              <span>Daily average saving</span>
+              <span class="exp">{fmt_gbp(daily_avg)}/day</span>
+            </div>
+            <div class="brow">
+              <span>Projected annual{f' <span class="note">({data_note})</span>' if data_note else ''}</span>
+              <span class="exp"><strong>{fmt_gbp(annual_proj)}/year</strong></span>
+            </div>
+          </div>
+        </div>"""
+
+    cards_html = "\n".join(savings_block(l, f, t, s) for l, f, t, s in sections)
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Solar Savings Summary</title>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+         background: #f0f4f0; color: #333; padding: 24px; font-size: 15px; }}
+  .container {{ max-width: 960px; margin: 0 auto; }}
+
+  .header {{ background: #1b5e20; color: #fff; padding: 22px 28px;
+             border-radius: 10px 10px 0 0; }}
+  .header h1 {{ font-size: 1.45em; font-weight: 700; letter-spacing: -0.3px; }}
+  .header p  {{ opacity: 0.75; font-size: 0.85em; margin-top: 4px; }}
+
+  .subtitle {{ background: #fff; padding: 14px 20px; border-radius: 0;
+               font-size: 0.88em; color: #666; border-bottom: 1px solid #e0e0e0; }}
+
+  .grid {{ display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-top: 14px; }}
+
+  .period-card {{ background: #fff; border-radius: 10px;
+                  box-shadow: 0 2px 6px rgba(0,0,0,.08); padding: 22px 24px; }}
+  .period-header {{ font-size: 1.05em; font-weight: 700; color: #1b5e20;
+                    text-transform: uppercase; letter-spacing: 0.5px; }}
+  .period-dates  {{ font-size: 0.82em; color: #999; margin-top: 2px; margin-bottom: 14px; }}
+  .saving-total  {{ font-size: 3em; font-weight: 800; color: #1b5e20; line-height: 1; }}
+  .saving-label  {{ font-size: 0.8em; color: #888; text-transform: uppercase;
+                    letter-spacing: 0.5px; margin-bottom: 16px; }}
+  .no-data       {{ color: #bbb; font-style: italic; padding: 20px 0; }}
+
+  .breakdown {{ margin-top: 14px; border-top: 1px solid #eee; padding-top: 12px; }}
+  .brow      {{ display: flex; justify-content: space-between;
+                padding: 5px 0; font-size: 0.9em; border-bottom: 1px solid #f5f5f5; }}
+  .brow:last-child {{ border-bottom: none; }}
+  .brow.divider {{ border-bottom: 2px solid #e0e0e0; margin: 4px 0; padding: 0; }}
+
+  .imp  {{ color: #b71c1c; }}
+  .exp  {{ color: #1b5e20; }}
+  .pv   {{ color: #e65100; }}
+  .note {{ color: #999; font-size: 0.82em; font-weight: 400; }}
+
+  .footer {{ text-align: center; color: #aaa; font-size: 0.78em; margin-top: 20px; }}
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <h1>Solar Savings Summary</h1>
+    <p>Generated {generated_at} &nbsp;&bull;&nbsp; Export tariff: Octopus Outgoing {export_rate_p:.0f}p
+       &nbsp;&bull;&nbsp; Savings calculated against actual Octopus Tracker rates</p>
+  </div>
+
+  <div class="subtitle">
+    <strong>How this is calculated:</strong> &ldquo;Without solar&rdquo; assumes all home
+    consumption would have been purchased from the grid at your actual Tracker rate.
+    Savings = avoided import cost + export revenue.
+  </div>
+
+  <div class="grid">
+    {cards_html}
+  </div>
+
+  <div class="footer">Tariff Analyser &bull; Sigenergy Home Energy System &bull; {generated_at}</div>
+
+</div>
+</body>
+</html>"""
+
+    os.makedirs(output_dir, exist_ok=True)
+    filename = f"savings_summary_{today.isoformat()}.html"
+    path     = os.path.join(output_dir, filename)
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(html)
+    except Exception as exc:
+        return None, str(exc)
+
+    _log(f"[Savings] Summary written: {path}")
     return path, None
 
 

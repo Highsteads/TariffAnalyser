@@ -4,12 +4,14 @@
 # Description: TariffAnalyser - compares UK energy tariffs against recorded
 #              half-hourly energy data from SigenEnergyManager.
 #              Outputs CSV reports openable in LibreOffice or Numbers.
+#              Includes Energy Dashboard with daily_summary DB tracking.
 # Author:      CliveS & Claude Sonnet 4.6
-# Date:        02-05-2026
-# Version:     1.0
+# Date:        06-05-2026
+# Version:     1.1
 
 import indigo
 import os
+import sqlite3
 import sys
 import time
 from datetime import datetime, date, timedelta
@@ -20,13 +22,38 @@ try:
 except ImportError:
     log_startup_banner = None
 
+sys.path.insert(0, "/Library/Application Support/Perceptive Automation")
+try:
+    from IndigoSecrets import (
+        OCTOPUS_API_KEY        as _OCTOPUS_API_KEY,
+        OCTOPUS_MPAN           as _OCTOPUS_MPAN,
+        OCTOPUS_SERIAL         as _OCTOPUS_SERIAL,
+        OCTOPUS_EXPORT_MPAN    as _OCTOPUS_EXPORT_MPAN,
+        OCTOPUS_EXPORT_SERIAL  as _OCTOPUS_EXPORT_SERIAL,
+        OCTOPUS_GAS_MPRN       as _OCTOPUS_GAS_MPRN,
+        OCTOPUS_GAS_SERIAL     as _OCTOPUS_GAS_SERIAL,
+    )
+    _SECRETS_LOADED = True
+except ImportError:
+    _OCTOPUS_API_KEY = _OCTOPUS_MPAN = _OCTOPUS_SERIAL = ""
+    _OCTOPUS_EXPORT_MPAN = _OCTOPUS_EXPORT_SERIAL = ""
+    _OCTOPUS_GAS_MPRN = _OCTOPUS_GAS_SERIAL = ""
+    _SECRETS_LOADED = False
+
 import tariff_engine
 import octopus_prices
 import report_generator
+import daily_collector
+import energy_dashboard
 
 PLUGIN_ID      = "com.clives.indigoplugin.tariffanalyser"
 PLUGIN_NAME    = "Tariff Analyser"
-PLUGIN_VERSION = "1.0"
+PLUGIN_VERSION = "1.1"
+
+# How many days back to refresh on each nightly auto-update (covers Octopus data delays)
+DAILY_SUMMARY_ROLLING_DAYS = 7
+# Hour (local time) to run the automatic daily summary update
+AUTO_UPDATE_HOUR = 2
 
 # Shared Perceptive Automation folder — output goes here (not inside any Indigo version folder)
 _PA_SHARED = "/Library/Application Support/Perceptive Automation"
@@ -58,13 +85,17 @@ class Plugin(indigo.PluginBase):
         self.pluginVersion      = plugin_version
 
         self._last_report_path  = None   # path of most recently generated report
+        self._last_auto_update  = None   # date of last automatic daily summary run
 
+        secrets_status = "Loaded (from secrets.py)" if _SECRETS_LOADED else "NOT FOUND - Octopus features disabled"
         if log_startup_banner:
             log_startup_banner(plugin_id, plugin_display_name, plugin_version, extras=[
                 ("Timeseries DB:", self._db_path()),
                 ("Agile DB:",      self._agile_db_path()),
                 ("Output folder:", self._output_dir()),
                 ("Region:",        self._region()),
+                ("Secrets:",       secrets_status),
+                ("Auto-update:",   f"Daily at {AUTO_UPDATE_HOUR:02d}:00 (rolling {DAILY_SUMMARY_ROLLING_DAYS} days)"),
             ])
         else:
             indigo.server.log(f"{plugin_display_name} v{plugin_version} starting")
@@ -73,9 +104,29 @@ class Plugin(indigo.PluginBase):
         log(f"{PLUGIN_NAME} v{PLUGIN_VERSION} ready")
         os.makedirs(self._output_dir(), exist_ok=True)
         octopus_prices.init_agile_db(self._agile_db_path())
+        db_path = self._db_path()
+        if os.path.exists(db_path):
+            daily_collector.init_daily_summary_db(db_path)
+            log(f"[DailySummary] Table ready: {db_path}")
 
     def shutdown(self):
         log(f"{PLUGIN_NAME} shutting down")
+
+    def runConcurrentThread(self):
+        """Auto-refresh daily_summary once per day at AUTO_UPDATE_HOUR (default 02:00)."""
+        while True:
+            try:
+                now   = datetime.now()
+                today = now.date()
+                if now.hour == AUTO_UPDATE_HOUR and self._last_auto_update != today:
+                    self._last_auto_update = today
+                    log(f"[DailySummary] Midnight auto-update starting ({DAILY_SUMMARY_ROLLING_DAYS}-day rolling)")
+                    self._run_daily_summary_update()
+            except self.StopThread:
+                break
+            except Exception as exc:
+                log(f"[DailySummary] Concurrent thread error: {exc}", level="ERROR")
+            self.sleep(60)
 
     # ================================================================
     # Plugin prefs helpers
@@ -106,6 +157,54 @@ class Plugin(indigo.PluginBase):
 
     def _export_tariff_key(self):
         return self.pluginPrefs.get("exportTariffKey", "outgoing_12p")
+
+    def _gas_unit_rate(self):
+        try:
+            return float(self.pluginPrefs.get("gasUnitRateP", "6.09"))
+        except (ValueError, TypeError):
+            return 6.09
+
+    def _build_octopus_config(self):
+        return {
+            "api_key":         _OCTOPUS_API_KEY,
+            "mpan":            _OCTOPUS_MPAN,
+            "serial":          _OCTOPUS_SERIAL,
+            "export_mpan":     _OCTOPUS_EXPORT_MPAN,
+            "export_serial":   _OCTOPUS_EXPORT_SERIAL,
+            "mprn":            _OCTOPUS_GAS_MPRN,
+            "gas_serial":      _OCTOPUS_GAS_SERIAL,
+            "region":          self._region(),
+            "gas_unit_rate_p": self._gas_unit_rate(),
+            "timeseries_db":   DEFAULT_DB_PATH,
+        }
+
+    def _run_daily_summary_update(self, days=DAILY_SUMMARY_ROLLING_DAYS, label="[DailySummary]"):
+        """Fetch/refresh the last N days of daily_summary data from Octopus API."""
+        db_path = self._db_path()
+        if not os.path.exists(db_path):
+            log(f"{label} Timeseries DB not found — skipping.", level="WARNING")
+            return False
+
+        if not _SECRETS_LOADED:
+            log(f"{label} secrets.py not found — Octopus credentials unavailable.", level="WARNING")
+            return False
+
+        date_to   = date.today() - timedelta(days=1)
+        date_from = date_to - timedelta(days=days - 1)
+
+        log(f"{label} Updating daily_summary: {date_from} to {date_to} ({days} days)")
+        try:
+            daily_collector.init_daily_summary_db(db_path)
+            daily_collector.update_daily_summary(
+                db_path, date_from, date_to,
+                self._build_octopus_config(),
+                log_fn=log,
+            )
+            log(f"{label} Daily summary update complete.")
+            return True
+        except Exception as exc:
+            log(f"{label} Update failed: {exc}", level="ERROR")
+            return False
 
     # ================================================================
     # Menu: Run Tariff Comparison (opens dialog)
@@ -307,22 +406,20 @@ class Plugin(indigo.PluginBase):
             log("[Report] No report found. Run a tariff comparison first.", level="WARNING")
 
     # ================================================================
-    # Dynamic menu list — last 60 days for daily report picker
+    # Menu item dialog pre-population — getMenuActionConfigUiValues is the
+    # correct Indigo base-class hook (plugin_base.py line 1195) that runs
+    # before the dialog opens, allowing fields to be seeded with live values.
     # ================================================================
 
-    def buildDayList(self, filter="", valuesDict=None, typeId="", targetId=0):
-        today  = date.today()
-        result = []
-        for i in range(60):
-            d = today - timedelta(days=i)
-            if i == 0:
-                label = f"Today — {d.strftime('%A, %-d %B %Y')}"
-            elif i == 1:
-                label = f"Yesterday — {d.strftime('%A, %-d %B %Y')}"
-            else:
-                label = d.strftime("%-d %B %Y")
-            result.append((d.isoformat(), label))
-        return result
+    def getMenuActionConfigUiValues(self, menu_id):
+        values_dict = indigo.Dict()
+        errors_dict = indigo.Dict()
+        today = date.today()
+        if menu_id == "dailyEnergyReport":
+            values_dict["rpt_day"]   = f"{today.day:02d}"
+            values_dict["rpt_month"] = f"{today.month:02d}"
+            values_dict["rpt_year"]  = str(today.year)
+        return (values_dict, errors_dict)
 
     # ================================================================
     # Menu: Daily Energy Summary (opens dialog)
@@ -331,20 +428,24 @@ class Plugin(indigo.PluginBase):
     def dailyEnergyReport(self, valuesDict, typeId):
         errors = indigo.Dict()
 
-        rpt_date_str = valuesDict.get("rpt_date", date.today().isoformat())
+        today = date.today()
         try:
-            report_date = date.fromisoformat(rpt_date_str)
+            report_date = date(
+                int(valuesDict.get("rpt_year",  str(today.year))),
+                int(valuesDict.get("rpt_month", f"{today.month:02d}")),
+                int(valuesDict.get("rpt_day",   f"{today.day:02d}")),
+            )
         except ValueError as exc:
-            errors["rpt_date"] = f"Invalid date: {exc}"
+            errors["rpt_day"] = f"Invalid date: {exc}"
             return False, valuesDict, errors
 
-        if report_date > date.today():
-            errors["rpt_date"] = "Date cannot be in the future."
+        if report_date > today:
+            errors["rpt_day"] = "Date cannot be in the future."
             return False, valuesDict, errors
 
         db_path = self._db_path()
         if not os.path.exists(db_path):
-            errors["rpt_date"] = "Timeseries DB not found. Check SigenEnergyManager is running v4.6+."
+            errors["rpt_day"] = "Timeseries DB not found. Check SigenEnergyManager is running v4.6+."
             return False, valuesDict, errors
 
         self._ensure_agile_prices(report_date, report_date)
@@ -355,7 +456,7 @@ class Plugin(indigo.PluginBase):
             export_rate_p=12.0, log_fn=log,
         )
         if err:
-            errors["rpt_date"] = err
+            errors["rpt_day"] = err
             return False, valuesDict, errors
 
         self._last_report_path = path
@@ -511,10 +612,33 @@ class Plugin(indigo.PluginBase):
         self._period_report(date(last_year, 1, 1), date(last_year, 12, 31), "Yearly")
 
     # ================================================================
+    # Menu: Savings Summary
+    # ================================================================
+
+    def savingsSummary(self, valuesDict=None, typeId=None):
+        """Generate a savings summary page for today/week/month/year."""
+        db_path = self._db_path()
+        if not os.path.exists(db_path):
+            log("[Savings] Timeseries DB not found. Check SigenEnergyManager v4.6+.",
+                level="WARNING")
+            return
+
+        log("[Savings] Generating savings summary...")
+        path, err = report_generator.generate_savings_summary(
+            db_path, self._output_dir(), export_rate_p=12.0, log_fn=log,
+        )
+        if err:
+            log(f"[Savings] Failed: {err}", level="ERROR")
+        else:
+            self._last_report_path = path
+            report_generator.open_in_browser(path, log_fn=log)
+
+    # ================================================================
     # Menu: Show Plugin Info
     # ================================================================
 
     def showPluginInfo(self, valuesDict=None, typeId=None):
+        secrets_status = "Loaded (from secrets.py)" if _SECRETS_LOADED else "NOT FOUND - Octopus features disabled"
         if log_startup_banner:
             log_startup_banner(self.pluginId, self.pluginDisplayName,
                                self.pluginVersion, extras=[
@@ -522,6 +646,8 @@ class Plugin(indigo.PluginBase):
                                    ("Agile DB:",      self._agile_db_path()),
                                    ("Output folder:", self._output_dir()),
                                    ("Region:",        self._region()),
+                                   ("Secrets:",       secrets_status),
+                                   ("Auto-update:",   f"Daily at {AUTO_UPDATE_HOUR:02d}:00 (rolling {DAILY_SUMMARY_ROLLING_DAYS} days)"),
                                ])
         else:
             log(f"{self.pluginDisplayName} v{self.pluginVersion}")
@@ -578,6 +704,118 @@ class Plugin(indigo.PluginBase):
     def actionUpdatePrices(self, action):
         """Action: Fetch latest Agile prices. Schedulable."""
         self.updatePriceData()
+
+    # ================================================================
+    # Menu: Run Energy Backfill (one-shot historical import)
+    # ================================================================
+
+    def runBackfill(self, valuesDict=None, typeId=None):
+        """Import Sigenergy File 2 XLSX then fetch all Octopus data from Jan 2026."""
+        db_path = self._db_path()
+        if not os.path.exists(db_path):
+            log("[Backfill] Timeseries DB not found. Check SigenEnergyManager v4.6+.",
+                level="WARNING")
+            return
+
+        if not _SECRETS_LOADED:
+            log("[Backfill] secrets.py not found — Octopus API credentials unavailable.",
+                level="WARNING")
+            return
+
+        daily_collector.init_daily_summary_db(db_path)
+        log("[Backfill] Starting energy history backfill...")
+
+        # Step 1: Sigenergy File 2 (solar/battery data from Mar 13 2026)
+        xlsx = daily_collector.SIGEN_FILE2_PATH
+        if os.path.exists(xlsx):
+            daily_collector.import_sigenergy_file2(db_path, xlsx, log_fn=log)
+        else:
+            log(f"[Backfill] Sigenergy File 2 not found at: {xlsx}", level="WARNING")
+            log("[Backfill] Download from Sigenergy app: Station -> Export -> Daily Energy")
+
+        # Step 2: Octopus API backfill in monthly batches (Jan 2026 → yesterday)
+        backfill_from = date(2026, 1, 1)
+        backfill_to   = date.today() - timedelta(days=1)
+        config        = self._build_octopus_config()
+
+        log(f"[Backfill] Fetching Octopus data: {backfill_from} to {backfill_to}")
+        cur_start = backfill_from
+        while cur_start <= backfill_to:
+            if cur_start.month == 12:
+                next_month = date(cur_start.year + 1, 1, 1)
+            else:
+                next_month = date(cur_start.year, cur_start.month + 1, 1)
+            cur_end = min(next_month - timedelta(days=1), backfill_to)
+
+            try:
+                daily_collector.update_daily_summary(
+                    db_path, cur_start, cur_end, config, log_fn=log
+                )
+            except Exception as exc:
+                log(f"[Backfill] Octopus fetch failed {cur_start}-{cur_end}: {exc}",
+                    level="ERROR")
+            cur_start = next_month
+
+        # Summary
+        try:
+            con      = sqlite3.connect(db_path)
+            total    = con.execute("SELECT COUNT(*) FROM daily_summary").fetchone()[0]
+            solar    = con.execute("SELECT COUNT(*) FROM daily_summary WHERE pv_kwh > 0").fetchone()[0]
+            gas      = con.execute("SELECT COUNT(*) FROM daily_summary WHERE gas_kwh IS NOT NULL").fetchone()[0]
+            con.close()
+            log(f"[Backfill] Complete — {total} days total, {solar} with solar, {gas} with gas")
+            log("[Backfill] Use 'Open Energy Dashboard' to view results")
+        except Exception as exc:
+            log(f"[Backfill] Summary query failed: {exc}", level="WARNING")
+
+    # ================================================================
+    # Menu: Open Energy Dashboard
+    # ================================================================
+
+    def openEnergyDashboard(self, valuesDict=None, typeId=None):
+        """Generate the interactive HTML energy dashboard and open it in the browser."""
+        db_path = self._db_path()
+        if not os.path.exists(db_path):
+            log("[Dashboard] Timeseries DB not found. Check SigenEnergyManager v4.6+.",
+                level="WARNING")
+            return
+
+        daily_collector.init_daily_summary_db(db_path)
+        log("[Dashboard] Generating energy dashboard...")
+        out_dir = self._output_dir()
+        os.makedirs(out_dir, exist_ok=True)
+
+        path, err = energy_dashboard.generate_dashboard(db_path, out_dir, log_fn=log)
+        if err:
+            log(f"[Dashboard] Generation failed: {err}", level="ERROR")
+        else:
+            log(f"[Dashboard] Dashboard saved: {path}")
+            energy_dashboard.open_in_browser(path, log_fn=log)
+
+    # ================================================================
+    # Menu: Update Daily Summary Now
+    # ================================================================
+
+    def updateDailySummaryNow(self, valuesDict=None, typeId=None):
+        """On-demand refresh of the daily_summary table (last 7 days)."""
+        self._run_daily_summary_update(label="[DailySummary]")
+
+    # ================================================================
+    # Actions (schedulable) — Energy Dashboard
+    # ================================================================
+
+    def actionUpdateDailySummary(self, action):
+        """Action: Refresh daily_summary for last 7 days. Schedule nightly via Indigo."""
+        days_str = action.props.get("rollingDays", str(DAILY_SUMMARY_ROLLING_DAYS))
+        try:
+            days = int(days_str)
+        except (ValueError, TypeError):
+            days = DAILY_SUMMARY_ROLLING_DAYS
+        self._run_daily_summary_update(days=days, label="[DailySummary][Action]")
+
+    def actionOpenEnergyDashboard(self, action):
+        """Action: Regenerate and open energy dashboard. Schedulable."""
+        self.openEnergyDashboard()
 
     # ================================================================
     # Internal helpers

@@ -30,7 +30,7 @@ Energy data is recorded every 30 minutes by the [SigenEnergyManager](https://git
 
 TariffAnalyser does not require any API keys or credentials. The Octopus Energy Agile price API is fully public and requires no authentication.
 
-See `Contents/Server Plugin/secrets_example.py` for details.
+See `Contents/Server Plugin/IndigoSecrets_example.py` for details.
 
 ## Output
 
