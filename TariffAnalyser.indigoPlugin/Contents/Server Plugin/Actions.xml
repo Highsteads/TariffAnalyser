@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Actions>
 
+    <!-- Generate the Tariff Comparison HTML report (schedulable). -->
     <Action id="generateReport" uiPath="PluginActions">
         <Name>Generate Tariff Comparison Report</Name>
         <CallbackMethod>actionGenerateReport</CallbackMethod>
@@ -8,6 +9,8 @@
             <Field id="reportDays" type="menu" defaultValue="30">
                 <Label>Date range</Label>
                 <List>
+                    <Option value="7">Last 7 days</Option>
+                    <Option value="14">Last 14 days</Option>
                     <Option value="30">Last 30 days</Option>
                     <Option value="60">Last 60 days</Option>
                     <Option value="90">Last 90 days</Option>
@@ -18,31 +21,14 @@
         </ConfigUI>
     </Action>
 
+    <!-- Refresh the Octopus Agile price cache (auto-run nightly; expose as
+         schedulable action for manual / override use). -->
     <Action id="updatePrices" uiPath="PluginActions">
         <Name>Update Octopus Agile Price Data</Name>
         <CallbackMethod>actionUpdatePrices</CallbackMethod>
     </Action>
 
-    <Action id="dailyEnergyReport" uiPath="PluginActions">
-        <Name>Generate Daily Energy Summary (yesterday)</Name>
-        <CallbackMethod>actionDailyEnergyReport</CallbackMethod>
-    </Action>
-
-    <Action id="weeklyEnergyReport" uiPath="PluginActions">
-        <Name>Generate Weekly Energy Summary (last 7 days)</Name>
-        <CallbackMethod>actionWeeklyEnergyReport</CallbackMethod>
-    </Action>
-
-    <Action id="monthlyEnergyReport" uiPath="PluginActions">
-        <Name>Generate Monthly Energy Summary (last calendar month)</Name>
-        <CallbackMethod>actionMonthlyEnergyReport</CallbackMethod>
-    </Action>
-
-    <Action id="yearlyEnergyReport" uiPath="PluginActions">
-        <Name>Generate Yearly Energy Summary (last calendar year)</Name>
-        <CallbackMethod>actionYearlyEnergyReport</CallbackMethod>
-    </Action>
-
+    <!-- Refresh the daily summary table (auto-run nightly at 02:00). -->
     <Action id="updateDailySummary" uiPath="PluginActions">
         <Name>Update Daily Energy Summary</Name>
         <CallbackMethod>actionUpdateDailySummary</CallbackMethod>
@@ -60,9 +46,10 @@
         </ConfigUI>
     </Action>
 
-    <Action id="openEnergyDashboard" uiPath="PluginActions">
-        <Name>Open Energy Dashboard</Name>
-        <CallbackMethod>actionOpenEnergyDashboard</CallbackMethod>
+    <!-- Energy Summary as an action (so it can be scheduled). -->
+    <Action id="energySummary" uiPath="PluginActions">
+        <Name>Generate Energy Summary</Name>
+        <CallbackMethod>actionEnergySummary</CallbackMethod>
     </Action>
 
 </Actions>

@@ -1,355 +1,44 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <MenuItems>
 
-    <MenuItem id="runTariffComparison">
-        <Name>Run Tariff Comparison...</Name>
-        <CallbackMethod>runTariffComparison</CallbackMethod>
+    <!-- ==================================================================
+         Energy Summary
+         One-page HTML summary of savings vs current tariff for:
+           Today, Yesterday, This week, This month, This year.
+         Opens in default browser.
+         ================================================================== -->
+    <MenuItem id="energySummary">
+        <Name>Energy Summary (today / yesterday / week / month / year)</Name>
+        <CallbackMethod>energySummary</CallbackMethod>
+    </MenuItem>
+
+    <!-- ==================================================================
+         Tariff Comparison
+         What would the same energy data have cost on every UK tariff over
+         a chosen lookback period?  Single dropdown - no date pickers.
+         Opens HTML in default browser.
+         ================================================================== -->
+    <MenuItem id="tariffComparison">
+        <Name>Tariff Comparison (which tariff would be cheapest?)</Name>
+        <CallbackMethod>tariffComparison</CallbackMethod>
         <ButtonTitle>Run Comparison</ButtonTitle>
         <ConfigUI>
-            <Field id="fromLabel" type="label">
-                <Label>From date</Label>
+            <Field id="instructions" type="label" fontSize="small">
+                <Label>Compares your actual half-hourly energy usage against every UK tariff (Tracker, Flexible, Go, Intelligent Go, Flux, Intelligent Flux, Agile) over the chosen period. Highlights which would have been cheapest - useful before switching.</Label>
             </Field>
-            <Field id="from_day" type="menu" defaultValue="01">
-                <Label>Day</Label>
+            <Field id="lookbackDays" type="menu" defaultValue="30">
+                <Label>Comparison period:</Label>
                 <List>
-                    <Option value="01">01</Option><Option value="02">02</Option><Option value="03">03</Option>
-                    <Option value="04">04</Option><Option value="05">05</Option><Option value="06">06</Option>
-                    <Option value="07">07</Option><Option value="08">08</Option><Option value="09">09</Option>
-                    <Option value="10">10</Option><Option value="11">11</Option><Option value="12">12</Option>
-                    <Option value="13">13</Option><Option value="14">14</Option><Option value="15">15</Option>
-                    <Option value="16">16</Option><Option value="17">17</Option><Option value="18">18</Option>
-                    <Option value="19">19</Option><Option value="20">20</Option><Option value="21">21</Option>
-                    <Option value="22">22</Option><Option value="23">23</Option><Option value="24">24</Option>
-                    <Option value="25">25</Option><Option value="26">26</Option><Option value="27">27</Option>
-                    <Option value="28">28</Option><Option value="29">29</Option><Option value="30">30</Option>
-                    <Option value="31">31</Option>
-                </List>
-            </Field>
-            <Field id="from_month" type="menu" defaultValue="04">
-                <Label>Month</Label>
-                <List>
-                    <Option value="01">January</Option><Option value="02">February</Option>
-                    <Option value="03">March</Option><Option value="04">April</Option>
-                    <Option value="05">May</Option><Option value="06">June</Option>
-                    <Option value="07">July</Option><Option value="08">August</Option>
-                    <Option value="09">September</Option><Option value="10">October</Option>
-                    <Option value="11">November</Option><Option value="12">December</Option>
-                </List>
-            </Field>
-            <Field id="from_year" type="menu" defaultValue="2026">
-                <Label>Year</Label>
-                <List>
-                    <Option value="2024">2024</Option>
-                    <Option value="2025">2025</Option>
-                    <Option value="2026">2026</Option>
-                    <Option value="2027">2027</Option>
-                </List>
-            </Field>
-
-            <Field id="toLabel" type="label">
-                <Label>To date</Label>
-            </Field>
-            <Field id="to_day" type="menu" defaultValue="02">
-                <Label>Day</Label>
-                <List>
-                    <Option value="01">01</Option><Option value="02">02</Option><Option value="03">03</Option>
-                    <Option value="04">04</Option><Option value="05">05</Option><Option value="06">06</Option>
-                    <Option value="07">07</Option><Option value="08">08</Option><Option value="09">09</Option>
-                    <Option value="10">10</Option><Option value="11">11</Option><Option value="12">12</Option>
-                    <Option value="13">13</Option><Option value="14">14</Option><Option value="15">15</Option>
-                    <Option value="16">16</Option><Option value="17">17</Option><Option value="18">18</Option>
-                    <Option value="19">19</Option><Option value="20">20</Option><Option value="21">21</Option>
-                    <Option value="22">22</Option><Option value="23">23</Option><Option value="24">24</Option>
-                    <Option value="25">25</Option><Option value="26">26</Option><Option value="27">27</Option>
-                    <Option value="28">28</Option><Option value="29">29</Option><Option value="30">30</Option>
-                    <Option value="31">31</Option>
-                </List>
-            </Field>
-            <Field id="to_month" type="menu" defaultValue="05">
-                <Label>Month</Label>
-                <List>
-                    <Option value="01">January</Option><Option value="02">February</Option>
-                    <Option value="03">March</Option><Option value="04">April</Option>
-                    <Option value="05">May</Option><Option value="06">June</Option>
-                    <Option value="07">July</Option><Option value="08">August</Option>
-                    <Option value="09">September</Option><Option value="10">October</Option>
-                    <Option value="11">November</Option><Option value="12">December</Option>
-                </List>
-            </Field>
-            <Field id="to_year" type="menu" defaultValue="2026">
-                <Label>Year</Label>
-                <List>
-                    <Option value="2024">2024</Option>
-                    <Option value="2025">2025</Option>
-                    <Option value="2026">2026</Option>
-                    <Option value="2027">2027</Option>
-                </List>
-            </Field>
-
-            <Field id="openInLibreOffice" type="checkbox" defaultValue="true">
-                <Label>Open report in LibreOffice when done</Label>
-            </Field>
-        </ConfigUI>
-    </MenuItem>
-
-    <MenuItem id="weeklyEnergyReport">
-        <Name>Weekly Energy Summary...</Name>
-        <CallbackMethod>weeklyEnergyReport</CallbackMethod>
-        <ButtonTitle>Generate Report</ButtonTitle>
-        <ConfigUI>
-            <Field id="dateLabel" type="label">
-                <Label>Week starting (7 days from this date)</Label>
-            </Field>
-            <Field id="rpt_day" type="menu" defaultValue="01">
-                <Label>Day</Label>
-                <List>
-                    <Option value="01">01</Option><Option value="02">02</Option><Option value="03">03</Option>
-                    <Option value="04">04</Option><Option value="05">05</Option><Option value="06">06</Option>
-                    <Option value="07">07</Option><Option value="08">08</Option><Option value="09">09</Option>
-                    <Option value="10">10</Option><Option value="11">11</Option><Option value="12">12</Option>
-                    <Option value="13">13</Option><Option value="14">14</Option><Option value="15">15</Option>
-                    <Option value="16">16</Option><Option value="17">17</Option><Option value="18">18</Option>
-                    <Option value="19">19</Option><Option value="20">20</Option><Option value="21">21</Option>
-                    <Option value="22">22</Option><Option value="23">23</Option><Option value="24">24</Option>
-                    <Option value="25">25</Option><Option value="26">26</Option><Option value="27">27</Option>
-                    <Option value="28">28</Option><Option value="29">29</Option><Option value="30">30</Option>
-                    <Option value="31">31</Option>
-                </List>
-            </Field>
-            <Field id="rpt_month" type="menu" defaultValue="05">
-                <Label>Month</Label>
-                <List>
-                    <Option value="01">January</Option><Option value="02">February</Option>
-                    <Option value="03">March</Option><Option value="04">April</Option>
-                    <Option value="05">May</Option><Option value="06">June</Option>
-                    <Option value="07">July</Option><Option value="08">August</Option>
-                    <Option value="09">September</Option><Option value="10">October</Option>
-                    <Option value="11">November</Option><Option value="12">December</Option>
-                </List>
-            </Field>
-            <Field id="rpt_year" type="menu" defaultValue="2026">
-                <Label>Year</Label>
-                <List>
-                    <Option value="2024">2024</Option><Option value="2025">2025</Option>
-                    <Option value="2026">2026</Option><Option value="2027">2027</Option>
+                    <Option value="7">Last 7 days</Option>
+                    <Option value="14">Last 14 days</Option>
+                    <Option value="30">Last 30 days (recommended)</Option>
+                    <Option value="60">Last 60 days</Option>
+                    <Option value="90">Last 90 days</Option>
+                    <Option value="180">Last 180 days</Option>
+                    <Option value="365">Last 365 days (full year)</Option>
                 </List>
             </Field>
         </ConfigUI>
-    </MenuItem>
-
-    <MenuItem id="monthlyEnergyReport">
-        <Name>Monthly Energy Summary...</Name>
-        <CallbackMethod>monthlyEnergyReport</CallbackMethod>
-        <ButtonTitle>Generate Report</ButtonTitle>
-        <ConfigUI>
-            <Field id="dateLabel" type="label">
-                <Label>Select month</Label>
-            </Field>
-            <Field id="rpt_month" type="menu" defaultValue="05">
-                <Label>Month</Label>
-                <List>
-                    <Option value="01">January</Option><Option value="02">February</Option>
-                    <Option value="03">March</Option><Option value="04">April</Option>
-                    <Option value="05">May</Option><Option value="06">June</Option>
-                    <Option value="07">July</Option><Option value="08">August</Option>
-                    <Option value="09">September</Option><Option value="10">October</Option>
-                    <Option value="11">November</Option><Option value="12">December</Option>
-                </List>
-            </Field>
-            <Field id="rpt_year" type="menu" defaultValue="2026">
-                <Label>Year</Label>
-                <List>
-                    <Option value="2024">2024</Option><Option value="2025">2025</Option>
-                    <Option value="2026">2026</Option><Option value="2027">2027</Option>
-                </List>
-            </Field>
-        </ConfigUI>
-    </MenuItem>
-
-    <MenuItem id="yearlyEnergyReport">
-        <Name>Yearly Energy Summary...</Name>
-        <CallbackMethod>yearlyEnergyReport</CallbackMethod>
-        <ButtonTitle>Generate Report</ButtonTitle>
-        <ConfigUI>
-            <Field id="dateLabel" type="label">
-                <Label>Select year</Label>
-            </Field>
-            <Field id="rpt_year" type="menu" defaultValue="2026">
-                <Label>Year</Label>
-                <List>
-                    <Option value="2024">2024</Option><Option value="2025">2025</Option>
-                    <Option value="2026">2026</Option><Option value="2027">2027</Option>
-                </List>
-            </Field>
-        </ConfigUI>
-    </MenuItem>
-
-    <MenuItem id="customPeriodReport">
-        <Name>Custom Period Report...</Name>
-        <CallbackMethod>customPeriodReport</CallbackMethod>
-        <ButtonTitle>Generate Report</ButtonTitle>
-        <ConfigUI>
-            <Field id="fromLabel" type="label"><Label>From date</Label></Field>
-            <Field id="from_day" type="menu" defaultValue="01">
-                <Label>Day</Label>
-                <List>
-                    <Option value="01">01</Option><Option value="02">02</Option><Option value="03">03</Option>
-                    <Option value="04">04</Option><Option value="05">05</Option><Option value="06">06</Option>
-                    <Option value="07">07</Option><Option value="08">08</Option><Option value="09">09</Option>
-                    <Option value="10">10</Option><Option value="11">11</Option><Option value="12">12</Option>
-                    <Option value="13">13</Option><Option value="14">14</Option><Option value="15">15</Option>
-                    <Option value="16">16</Option><Option value="17">17</Option><Option value="18">18</Option>
-                    <Option value="19">19</Option><Option value="20">20</Option><Option value="21">21</Option>
-                    <Option value="22">22</Option><Option value="23">23</Option><Option value="24">24</Option>
-                    <Option value="25">25</Option><Option value="26">26</Option><Option value="27">27</Option>
-                    <Option value="28">28</Option><Option value="29">29</Option><Option value="30">30</Option>
-                    <Option value="31">31</Option>
-                </List>
-            </Field>
-            <Field id="from_month" type="menu" defaultValue="04">
-                <Label>Month</Label>
-                <List>
-                    <Option value="01">January</Option><Option value="02">February</Option>
-                    <Option value="03">March</Option><Option value="04">April</Option>
-                    <Option value="05">May</Option><Option value="06">June</Option>
-                    <Option value="07">July</Option><Option value="08">August</Option>
-                    <Option value="09">September</Option><Option value="10">October</Option>
-                    <Option value="11">November</Option><Option value="12">December</Option>
-                </List>
-            </Field>
-            <Field id="from_year" type="menu" defaultValue="2026">
-                <Label>Year</Label>
-                <List>
-                    <Option value="2024">2024</Option><Option value="2025">2025</Option>
-                    <Option value="2026">2026</Option><Option value="2027">2027</Option>
-                </List>
-            </Field>
-            <Field id="toLabel" type="label"><Label>To date</Label></Field>
-            <Field id="to_day" type="menu" defaultValue="02">
-                <Label>Day</Label>
-                <List>
-                    <Option value="01">01</Option><Option value="02">02</Option><Option value="03">03</Option>
-                    <Option value="04">04</Option><Option value="05">05</Option><Option value="06">06</Option>
-                    <Option value="07">07</Option><Option value="08">08</Option><Option value="09">09</Option>
-                    <Option value="10">10</Option><Option value="11">11</Option><Option value="12">12</Option>
-                    <Option value="13">13</Option><Option value="14">14</Option><Option value="15">15</Option>
-                    <Option value="16">16</Option><Option value="17">17</Option><Option value="18">18</Option>
-                    <Option value="19">19</Option><Option value="20">20</Option><Option value="21">21</Option>
-                    <Option value="22">22</Option><Option value="23">23</Option><Option value="24">24</Option>
-                    <Option value="25">25</Option><Option value="26">26</Option><Option value="27">27</Option>
-                    <Option value="28">28</Option><Option value="29">29</Option><Option value="30">30</Option>
-                    <Option value="31">31</Option>
-                </List>
-            </Field>
-            <Field id="to_month" type="menu" defaultValue="05">
-                <Label>Month</Label>
-                <List>
-                    <Option value="01">January</Option><Option value="02">February</Option>
-                    <Option value="03">March</Option><Option value="04">April</Option>
-                    <Option value="05">May</Option><Option value="06">June</Option>
-                    <Option value="07">July</Option><Option value="08">August</Option>
-                    <Option value="09">September</Option><Option value="10">October</Option>
-                    <Option value="11">November</Option><Option value="12">December</Option>
-                </List>
-            </Field>
-            <Field id="to_year" type="menu" defaultValue="2026">
-                <Label>Year</Label>
-                <List>
-                    <Option value="2024">2024</Option><Option value="2025">2025</Option>
-                    <Option value="2026">2026</Option><Option value="2027">2027</Option>
-                </List>
-            </Field>
-        </ConfigUI>
-    </MenuItem>
-
-    <MenuItem id="dailyEnergyReport">
-        <Name>Daily Energy Summary...</Name>
-        <CallbackMethod>dailyEnergyReport</CallbackMethod>
-        <ButtonTitle>Generate Report</ButtonTitle>
-        <ConfigUI>
-            <Field id="dateLabel" type="label">
-                <Label>Select date</Label>
-            </Field>
-            <Field id="rpt_day" type="menu" defaultValue="01">
-                <Label>Day</Label>
-                <List>
-                    <Option value="01">01</Option><Option value="02">02</Option><Option value="03">03</Option>
-                    <Option value="04">04</Option><Option value="05">05</Option><Option value="06">06</Option>
-                    <Option value="07">07</Option><Option value="08">08</Option><Option value="09">09</Option>
-                    <Option value="10">10</Option><Option value="11">11</Option><Option value="12">12</Option>
-                    <Option value="13">13</Option><Option value="14">14</Option><Option value="15">15</Option>
-                    <Option value="16">16</Option><Option value="17">17</Option><Option value="18">18</Option>
-                    <Option value="19">19</Option><Option value="20">20</Option><Option value="21">21</Option>
-                    <Option value="22">22</Option><Option value="23">23</Option><Option value="24">24</Option>
-                    <Option value="25">25</Option><Option value="26">26</Option><Option value="27">27</Option>
-                    <Option value="28">28</Option><Option value="29">29</Option><Option value="30">30</Option>
-                    <Option value="31">31</Option>
-                </List>
-            </Field>
-            <Field id="rpt_month" type="menu" defaultValue="01">
-                <Label>Month</Label>
-                <List>
-                    <Option value="01">January</Option><Option value="02">February</Option>
-                    <Option value="03">March</Option><Option value="04">April</Option>
-                    <Option value="05">May</Option><Option value="06">June</Option>
-                    <Option value="07">July</Option><Option value="08">August</Option>
-                    <Option value="09">September</Option><Option value="10">October</Option>
-                    <Option value="11">November</Option><Option value="12">December</Option>
-                </List>
-            </Field>
-            <Field id="rpt_year" type="menu" defaultValue="2026">
-                <Label>Year</Label>
-                <List>
-                    <Option value="2024">2024</Option>
-                    <Option value="2025">2025</Option>
-                    <Option value="2026">2026</Option>
-                    <Option value="2027">2027</Option>
-                </List>
-            </Field>
-            <Field id="rptOpenInBrowser" type="checkbox" defaultValue="true">
-                <Label>Open in browser when done</Label>
-            </Field>
-        </ConfigUI>
-    </MenuItem>
-
-    <MenuItem id="savingsSummary">
-        <Name>Solar Savings Summary</Name>
-        <CallbackMethod>savingsSummary</CallbackMethod>
-    </MenuItem>
-
-    <MenuItem id="openEnergyDashboard">
-        <Name>Open Energy Dashboard</Name>
-        <CallbackMethod>openEnergyDashboard</CallbackMethod>
-    </MenuItem>
-
-    <MenuItem id="updateDailySummaryNow">
-        <Name>Update Daily Summary Now (last 7 days)</Name>
-        <CallbackMethod>updateDailySummaryNow</CallbackMethod>
-    </MenuItem>
-
-    <MenuItem id="runBackfill">
-        <Name>Run Energy History Backfill (one-off)</Name>
-        <CallbackMethod>runBackfill</CallbackMethod>
-    </MenuItem>
-
-    <MenuItem id="exportRawData">
-        <Name>Export Raw Data to CSV</Name>
-        <CallbackMethod>exportRawData</CallbackMethod>
-    </MenuItem>
-
-    <MenuItem id="updatePriceData">
-        <Name>Update Octopus Agile Price Data</Name>
-        <CallbackMethod>updatePriceData</CallbackMethod>
-    </MenuItem>
-
-    <MenuItem id="showDataCoverage">
-        <Name>Show Data Coverage</Name>
-        <CallbackMethod>showDataCoverage</CallbackMethod>
-    </MenuItem>
-
-    <MenuItem id="openLastReport">
-        <Name>Open Last Report in LibreOffice</Name>
-        <CallbackMethod>openLastReport</CallbackMethod>
     </MenuItem>
 
     <MenuItem id="sep1" isSeparator="true"/>
