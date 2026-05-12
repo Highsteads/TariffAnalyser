@@ -16,7 +16,7 @@ Energy data is recorded every 30 minutes by the [SigenEnergyManager](https://git
 
 ## Requirements
 
-- Indigo 2025.2 or later (Python 3.13)
+- Indigo 2022.1 or later (Python 3.10+)
 - [SigenEnergyManager](https://github.com/Highsteads/SigenEnergyManager) v4.6+ (provides the half-hourly energy database)
 - LibreOffice or Numbers (optional, for auto-opening reports)
 
