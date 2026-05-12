@@ -100,7 +100,7 @@ class Plugin(indigo.PluginBase):
         self._last_report_path  = None   # path of most recently generated report
         self._last_auto_update  = None   # date of last automatic daily summary run
 
-        secrets_status = "Loaded (from secrets.py)" if _SECRETS_LOADED else "NOT FOUND - Octopus features disabled"
+        secrets_status = "Loaded (from IndigoSecrets.py)" if _SECRETS_LOADED else "NOT FOUND - Octopus features disabled"
         if log_startup_banner:
             log_startup_banner(plugin_id, plugin_display_name, plugin_version, extras=[
                 ("Timeseries DB:", self._db_path()),
@@ -199,7 +199,7 @@ class Plugin(indigo.PluginBase):
             return False
 
         if not _SECRETS_LOADED:
-            log(f"{label} secrets.py not found — Octopus credentials unavailable.", level="WARNING")
+            log(f"{label} IndigoSecrets.py not found — Octopus credentials unavailable.", level="WARNING")
             return False
 
         date_to   = date.today() - timedelta(days=1)
@@ -347,7 +347,7 @@ class Plugin(indigo.PluginBase):
     # ================================================================
 
     def showPluginInfo(self, valuesDict=None, typeId=None):
-        secrets_status = "Loaded (from secrets.py)" if _SECRETS_LOADED else "NOT FOUND - Octopus features disabled"
+        secrets_status = "Loaded (from IndigoSecrets.py)" if _SECRETS_LOADED else "NOT FOUND - Octopus features disabled"
         if log_startup_banner:
             log_startup_banner(self.pluginId, self.pluginDisplayName,
                                self.pluginVersion, extras=[

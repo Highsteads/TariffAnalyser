@@ -26,12 +26,26 @@ Energy data is recorded every 30 minutes by the [SigenEnergyManager](https://git
 2. Unzip the downloaded file — you will get `TariffAnalyser.indigoPlugin`
 3. Double-click `TariffAnalyser.indigoPlugin` — Indigo will install it automatically
 
-## Credentials
+## Credentials — `IndigoSecrets.py` vs `IndigoSecrets_example.py`
 
-TariffAnalyser does not require any API keys or credentials. The Octopus Energy Agile price API is fully public and requires no authentication.
+This plugin (along with all CliveS Indigo plugins) reads sensitive values from
+a shared master credentials file at:
 
-See `Contents/Server Plugin/IndigoSecrets_example.py` for details.
+`/Library/Application Support/Perceptive Automation/IndigoSecrets.py`
 
+| File | Purpose | Real data? | Committed to GitHub? |
+|------|---------|------------|----------------------|
+| `IndigoSecrets.py` | Working file the plugin reads at runtime. Keep a backup in a password manager. | YES | **NO** — listed in `.gitignore` |
+| `IndigoSecrets_example.py` | Template only — empty placeholders. Shipped in the plugin bundle. | NO | YES |
+
+If you do not have `IndigoSecrets.py`, copy `IndigoSecrets_example.py` from
+the plugin bundle to that location and fill in your values. Or skip
+`IndigoSecrets.py` entirely and enter values via the plugin's configuration
+dialog — `IndigoSecrets.py` wins over the dialog when both are set.
+
+If a required value is set in NEITHER source the plugin logs an ERROR
+pointing the user to either fill in the matching field or add the key to
+`IndigoSecrets.py`.
 ## Output
 
 Reports are saved to:
