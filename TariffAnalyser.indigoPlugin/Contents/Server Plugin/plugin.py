@@ -4,9 +4,13 @@
 # Description: TariffAnalyser - compares UK energy tariffs against recorded
 #              half-hourly energy data from SigenEnergyManager.
 #              Outputs HTML reports that open in the default browser.
-# Author:      CliveS & Claude Sonnet 4.6
-# Date:        10-05-2026
-# Version:     1.3
+# Author:      CliveS & Claude Opus 4.7
+# Date:        23-05-2026
+# Version:     1.4
+#
+# v1.4 (23-05-2026): Millisecond timestamp [HH:MM:SS.mmm] prefix on every
+# log line via plugin_utils.install_timestamp_filter() — matches Device
+# Activity Monitor convention. New "Toggle Timestamps in Log" menu item.
 #
 # v1.2 (10-05-2026):
 # - Slimmed menu to just three items: Energy Summary, Tariff Comparison,
@@ -34,6 +38,10 @@ try:
     from plugin_utils import log_startup_banner
 except ImportError:
     log_startup_banner = None
+try:
+    from plugin_utils import install_timestamp_filter
+except ImportError:
+    install_timestamp_filter = None
 
 sys.path.insert(0, "/Library/Application Support/Perceptive Automation")
 try:
@@ -85,7 +93,7 @@ DEFAULT_REGION = "F"
 
 
 def log(message, level="INFO"):
-    indigo.server.log(f"[{datetime.now().strftime('%H:%M:%S')}] {message}",
+    indigo.server.log(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] {message}",
                       level=level)
 
 
@@ -99,6 +107,12 @@ class Plugin(indigo.PluginBase):
 
         self._last_report_path  = None   # path of most recently generated report
         self._last_auto_update  = None   # date of last automatic daily summary run
+        self.timestamp_enabled  = bool(plugin_prefs.get("timestampEnabled", True))
+
+        if install_timestamp_filter:
+            self._ts_filter = install_timestamp_filter(self, enabled=self.timestamp_enabled)
+        else:
+            self._ts_filter = None
 
         secrets_status = self._secrets_status_line()
         if log_startup_banner:
@@ -366,18 +380,28 @@ class Plugin(indigo.PluginBase):
 
     def showPluginInfo(self, valuesDict=None, typeId=None):
         secrets_status = self._secrets_status_line()
+        extras = [
+            ("Timeseries DB:",     self._db_path()),
+            ("Agile DB:",          self._agile_db_path()),
+            ("Output folder:",     self._output_dir()),
+            ("Region:",            self._region()),
+            ("Secrets:",           secrets_status),
+            ("Auto-update:",       f"Daily at {AUTO_UPDATE_HOUR:02d}:00 (rolling {DAILY_SUMMARY_ROLLING_DAYS} days)"),
+            ("Timestamps in Log:", "ON" if self.timestamp_enabled else "OFF"),
+        ]
         if log_startup_banner:
             log_startup_banner(self.pluginId, self.pluginDisplayName,
-                               self.pluginVersion, extras=[
-                                   ("Timeseries DB:", self._db_path()),
-                                   ("Agile DB:",      self._agile_db_path()),
-                                   ("Output folder:", self._output_dir()),
-                                   ("Region:",        self._region()),
-                                   ("Secrets:",       secrets_status),
-                                   ("Auto-update:",   f"Daily at {AUTO_UPDATE_HOUR:02d}:00 (rolling {DAILY_SUMMARY_ROLLING_DAYS} days)"),
-                               ])
+                               self.pluginVersion, extras=extras)
         else:
             log(f"{self.pluginDisplayName} v{self.pluginVersion}")
+
+    def menuToggleTimestamps(self):
+        self.timestamp_enabled = not self.timestamp_enabled
+        self.pluginPrefs["timestampEnabled"] = self.timestamp_enabled
+        if self._ts_filter:
+            self._ts_filter.enabled = self.timestamp_enabled
+        state = "ON" if self.timestamp_enabled else "OFF"
+        indigo.server.log(f"[{self.pluginDisplayName}] Timestamps in Log -> {state}")
 
     # ================================================================
     # Actions (schedulable)

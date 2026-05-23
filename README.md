@@ -139,14 +139,28 @@ Accessed via Indigo → Plugins → Tariff Analyser → Configure:
 | Gas MPRN | (blank) | Fallback for `IndigoSecrets.OCTOPUS_GAS_MPRN` |
 | Gas meter serial | (blank) | Fallback for `IndigoSecrets.OCTOPUS_GAS_SERIAL` |
 
+## Logging
+
+Every log line is prefixed with a millisecond timestamp `[HH:MM:SS.mmm]` so
+events can be correlated tightly with other CliveS plugins (Device Activity
+Monitor uses the same convention).
+
+To turn the prefix off (or back on) at any time:
+
+**Plugins → Tariff Analyser → Toggle Timestamps in Log (on/off)**
+
+The setting is stored in `pluginPrefs` (`timestampEnabled`) and persists across
+restarts. Defaults to ON.
+
 ## Version history
 
+- **1.4** (23-05-2026) — millisecond timestamp `[HH:MM:SS.mmm]` prefix on every `self.logger` line via `plugin_utils.install_timestamp_filter()`; new "Toggle Timestamps in Log" menu item.
 - **1.3** (23-05-2026) — PluginConfig fallback for all 7 Octopus credential keys; secrets-policy compliance. `IndigoSecrets.py` still takes precedence when set.
 - **1.2** — current SigenEnergyManager integration; daily auto-update at 02:00.
 
 ## Author
 
-CliveS & Claude Sonnet 4.6 — Medomsley, County Durham, England
+CliveS & Claude Opus 4.7 — Medomsley, County Durham, England
 
 ## Licence
 
