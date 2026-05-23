@@ -6,7 +6,7 @@
 #              Outputs HTML reports that open in the default browser.
 # Author:      CliveS & Claude Sonnet 4.6
 # Date:        10-05-2026
-# Version:     1.2
+# Version:     1.3
 #
 # v1.2 (10-05-2026):
 # - Slimmed menu to just three items: Energy Summary, Tariff Comparison,
@@ -100,7 +100,7 @@ class Plugin(indigo.PluginBase):
         self._last_report_path  = None   # path of most recently generated report
         self._last_auto_update  = None   # date of last automatic daily summary run
 
-        secrets_status = "Loaded (from IndigoSecrets.py)" if _SECRETS_LOADED else "NOT FOUND - Octopus features disabled"
+        secrets_status = self._secrets_status_line()
         if log_startup_banner:
             log_startup_banner(plugin_id, plugin_display_name, plugin_version, extras=[
                 ("Timeseries DB:", self._db_path()),
@@ -178,18 +178,35 @@ class Plugin(indigo.PluginBase):
             return 6.09
 
     def _build_octopus_config(self):
+        """Resolve Octopus credentials — IndigoSecrets.py first, PluginConfig
+        fallback. Per the global secrets policy, PluginConfig must provide a
+        usable channel for users who don't maintain IndigoSecrets.py."""
+        prefs = self.pluginPrefs
         return {
-            "api_key":         _OCTOPUS_API_KEY,
-            "mpan":            _OCTOPUS_MPAN,
-            "serial":          _OCTOPUS_SERIAL,
-            "export_mpan":     _OCTOPUS_EXPORT_MPAN,
-            "export_serial":   _OCTOPUS_EXPORT_SERIAL,
-            "mprn":            _OCTOPUS_GAS_MPRN,
-            "gas_serial":      _OCTOPUS_GAS_SERIAL,
+            "api_key":         _OCTOPUS_API_KEY        or prefs.get("octopusApiKey",       "").strip(),
+            "mpan":            _OCTOPUS_MPAN           or prefs.get("octopusMpan",         "").strip(),
+            "serial":          _OCTOPUS_SERIAL         or prefs.get("octopusSerial",       "").strip(),
+            "export_mpan":     _OCTOPUS_EXPORT_MPAN    or prefs.get("octopusExportMpan",   "").strip(),
+            "export_serial":   _OCTOPUS_EXPORT_SERIAL  or prefs.get("octopusExportSerial", "").strip(),
+            "mprn":            _OCTOPUS_GAS_MPRN       or prefs.get("octopusGasMprn",      "").strip(),
+            "gas_serial":      _OCTOPUS_GAS_SERIAL     or prefs.get("octopusGasSerial",    "").strip(),
             "region":          self._region(),
             "gas_unit_rate_p": self._gas_unit_rate(),
             "timeseries_db":   DEFAULT_DB_PATH,
         }
+
+    def _have_octopus_creds(self):
+        """True if at least the API key resolves from either source."""
+        cfg = self._build_octopus_config()
+        return bool(cfg["api_key"])
+
+    def _secrets_status_line(self):
+        """One-line human description of where credentials are coming from."""
+        if _SECRETS_LOADED and _OCTOPUS_API_KEY:
+            return "Loaded (from IndigoSecrets.py)"
+        if self._have_octopus_creds():
+            return "Loaded (from PluginConfig — IndigoSecrets.py not used)"
+        return "NOT FOUND — set in IndigoSecrets.py or PluginConfig; Octopus features disabled"
 
     def _run_daily_summary_update(self, days=DAILY_SUMMARY_ROLLING_DAYS, label="[DailySummary]"):
         """Fetch/refresh the last N days of daily_summary data from Octopus API."""
@@ -198,8 +215,9 @@ class Plugin(indigo.PluginBase):
             log(f"{label} Timeseries DB not found — skipping.", level="WARNING")
             return False
 
-        if not _SECRETS_LOADED:
-            log(f"{label} IndigoSecrets.py not found — Octopus credentials unavailable.", level="WARNING")
+        if not self._have_octopus_creds():
+            log(f"{label} Octopus API key not configured — set in IndigoSecrets.py OR "
+                f"Plugins -> Tariff Analyser -> Configure.", level="WARNING")
             return False
 
         date_to   = date.today() - timedelta(days=1)
@@ -347,7 +365,7 @@ class Plugin(indigo.PluginBase):
     # ================================================================
 
     def showPluginInfo(self, valuesDict=None, typeId=None):
-        secrets_status = "Loaded (from IndigoSecrets.py)" if _SECRETS_LOADED else "NOT FOUND - Octopus features disabled"
+        secrets_status = self._secrets_status_line()
         if log_startup_banner:
             log_startup_banner(self.pluginId, self.pluginDisplayName,
                                self.pluginVersion, extras=[

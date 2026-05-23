@@ -73,4 +73,34 @@
         </List>
     </Field>
 
+    <Field id="octopusLabel" type="label">
+        <Label>--- Octopus Energy Credentials ---</Label>
+    </Field>
+
+    <Field id="octopusHelp" type="label" fontSize="mini" alignWithControl="true">
+        <Label>Read from IndigoSecrets.py first (OCTOPUS_API_KEY / OCTOPUS_MPAN / OCTOPUS_SERIAL / OCTOPUS_EXPORT_MPAN / OCTOPUS_EXPORT_SERIAL / OCTOPUS_GAS_MPRN / OCTOPUS_GAS_SERIAL). The fields below are the fallback for users without IndigoSecrets.py — fill them in only if IndigoSecrets is not set up.</Label>
+    </Field>
+
+    <Field id="octopusApiKey" type="textfield" secure="true" defaultValue="">
+        <Label>Octopus API key</Label>
+    </Field>
+    <Field id="octopusMpan" type="textfield" defaultValue="">
+        <Label>Import MPAN</Label>
+    </Field>
+    <Field id="octopusSerial" type="textfield" defaultValue="">
+        <Label>Import meter serial</Label>
+    </Field>
+    <Field id="octopusExportMpan" type="textfield" defaultValue="">
+        <Label>Export MPAN</Label>
+    </Field>
+    <Field id="octopusExportSerial" type="textfield" defaultValue="">
+        <Label>Export meter serial</Label>
+    </Field>
+    <Field id="octopusGasMprn" type="textfield" defaultValue="">
+        <Label>Gas MPRN</Label>
+    </Field>
+    <Field id="octopusGasSerial" type="textfield" defaultValue="">
+        <Label>Gas meter serial</Label>
+    </Field>
+
 </PluginConfig>

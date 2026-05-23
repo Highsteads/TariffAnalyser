@@ -9,9 +9,9 @@
     <key>CFBundleName</key>
     <string>Tariff Analyser</string>
     <key>CFBundleVersion</key>
-    <string>1.2</string>
+    <string>1.3</string>
     <key>PluginVersion</key>
-    <string>1.2</string>
+    <string>1.3</string>
     <key>ServerApiVersion</key>
     <string>3.0</string>
     <key>IwsApiVersion</key>
