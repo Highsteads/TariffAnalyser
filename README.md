@@ -46,6 +46,24 @@ dialog — `IndigoSecrets.py` wins over the dialog when both are set.
 If a required value is set in NEITHER source the plugin logs an ERROR
 pointing the user to either fill in the matching field or add the key to
 `IndigoSecrets.py`.
+
+**Keys read by TariffAnalyser:**
+
+```python
+OCTOPUS_API_KEY       = "sk_live_..."
+OCTOPUS_MPAN          = ""
+OCTOPUS_SERIAL        = ""
+OCTOPUS_EXPORT_MPAN   = ""   # optional — export tariff comparisons
+OCTOPUS_EXPORT_SERIAL = ""
+OCTOPUS_GAS_MPRN      = ""   # optional — gas cost calculations
+OCTOPUS_GAS_SERIAL    = ""
+```
+
+Each key has a matching field under **Plugins → Tariff Analyser → Configure**
+(see Plugin Configuration below) so the plugin can be set up entirely via
+the GUI for users who don't maintain `IndigoSecrets.py`. *(PluginConfig
+fallback added in v1.3.)*
+
 ## Output
 
 Reports are saved to:
@@ -113,6 +131,18 @@ Accessed via Indigo → Plugins → Tariff Analyser → Configure:
 | Octopus region | F (North East England) | Used for Agile price lookups |
 | Export tariff | Octopus Outgoing 12p | Applied to all import tariff comparisons |
 | Default date range | Last 30 days | Default for scheduled action |
+| Octopus API key | (blank) | Fallback for `IndigoSecrets.OCTOPUS_API_KEY` |
+| Import MPAN | (blank) | Fallback for `IndigoSecrets.OCTOPUS_MPAN` |
+| Import meter serial | (blank) | Fallback for `IndigoSecrets.OCTOPUS_SERIAL` |
+| Export MPAN | (blank) | Fallback for `IndigoSecrets.OCTOPUS_EXPORT_MPAN` |
+| Export meter serial | (blank) | Fallback for `IndigoSecrets.OCTOPUS_EXPORT_SERIAL` |
+| Gas MPRN | (blank) | Fallback for `IndigoSecrets.OCTOPUS_GAS_MPRN` |
+| Gas meter serial | (blank) | Fallback for `IndigoSecrets.OCTOPUS_GAS_SERIAL` |
+
+## Version history
+
+- **1.3** (23-05-2026) — PluginConfig fallback for all 7 Octopus credential keys; secrets-policy compliance. `IndigoSecrets.py` still takes precedence when set.
+- **1.2** — current SigenEnergyManager integration; daily auto-update at 02:00.
 
 ## Author
 
