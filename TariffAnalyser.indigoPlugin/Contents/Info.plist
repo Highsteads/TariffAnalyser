@@ -2,28 +2,28 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleIdentifier</key>
-    <string>com.clives.indigoplugin.tariffanalyser</string>
-    <key>CFBundleDisplayName</key>
-    <string>Tariff Analyser</string>
-    <key>CFBundleName</key>
-    <string>Tariff Analyser</string>
-    <key>CFBundleVersion</key>
-    <string>1.4</string>
-    <key>PluginVersion</key>
-    <string>1.4</string>
-    <key>ServerApiVersion</key>
-    <string>3.0</string>
-    <key>IwsApiVersion</key>
-    <string>1.0.0</string>
-    <key>CFBundleURLTypes</key>
-    <array/>
-    <key>GithubInfo</key>
-    <dict>
-        <key>org</key>
-        <string>Highsteads</string>
-        <key>repo</key>
-        <string>TariffAnalyser</string>
-    </dict>
+	<key>CFBundleDisplayName</key>
+	<string>Tariff Analyser</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.clives.indigoplugin.tariffanalyser</string>
+	<key>CFBundleName</key>
+	<string>Tariff Analyser</string>
+	<key>CFBundleURLTypes</key>
+	<array/>
+	<key>CFBundleVersion</key>
+	<string>1.0.0</string>
+	<key>GithubInfo</key>
+	<dict>
+		<key>org</key>
+		<string>Highsteads</string>
+		<key>repo</key>
+		<string>TariffAnalyser</string>
+	</dict>
+	<key>IwsApiVersion</key>
+	<string>1.0.0</string>
+	<key>PluginVersion</key>
+	<string>1.4</string>
+	<key>ServerApiVersion</key>
+	<string>3.0</string>
 </dict>
 </plist>

@@ -115,17 +115,7 @@ class Plugin(indigo.PluginBase):
             self._ts_filter = None
 
         secrets_status = self._secrets_status_line()
-        if log_startup_banner:
-            log_startup_banner(plugin_id, plugin_display_name, plugin_version, extras=[
-                ("Timeseries DB:", self._db_path()),
-                ("Agile DB:",      self._agile_db_path()),
-                ("Output folder:", self._output_dir()),
-                ("Region:",        self._region()),
-                ("Secrets:",       secrets_status),
-                ("Auto-update:",   f"Daily at {AUTO_UPDATE_HOUR:02d}:00 (rolling {DAILY_SUMMARY_ROLLING_DAYS} days)"),
-            ])
-        else:
-            indigo.server.log(f"{plugin_display_name} v{plugin_version} starting")
+        # Startup banner moved to showPluginInfo on demand (revised 25-May-2026 per Jay).
 
     def startup(self):
         log(f"{PLUGIN_NAME} v{self.pluginVersion} ready")
