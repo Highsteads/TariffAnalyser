@@ -6,7 +6,7 @@
 #              Outputs HTML reports that open in the default browser.
 # Author:      CliveS & Claude Opus 4.7
 # Date:        23-05-2026
-# Version:     1.4
+# Version:     1.5
 #
 # v1.4 (23-05-2026): Millisecond timestamp [HH:MM:SS.mmm] prefix on every
 # log line via plugin_utils.install_timestamp_filter() — matches Device
@@ -440,7 +440,7 @@ class Plugin(indigo.PluginBase):
 
             open_on_action = self.pluginPrefs.get("openOnScheduledReport", False)
             if open_on_action:
-                report_generator.open_in_libreoffice(path, log_fn=log)
+                report_generator.open_in_browser(path, log_fn=log)
 
     def actionUpdatePrices(self, action):
         """Action: Fetch latest Agile prices. Schedulable."""

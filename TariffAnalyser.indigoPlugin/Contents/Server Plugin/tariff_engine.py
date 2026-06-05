@@ -418,7 +418,9 @@ def get_coverage(timeseries_db_path):
             latest   = row[1][:10]
             count    = row[2]
             return earliest, latest, count
-    except Exception:
+    except sqlite3.Error:
+        # Expected: DB missing / locked / table absent -> fall through to empty coverage.
+        # Narrowed from a bare 'except Exception' which also masked real programming errors.
         pass
     return None, None, 0
 
