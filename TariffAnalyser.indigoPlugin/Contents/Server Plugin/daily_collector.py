@@ -16,7 +16,7 @@ import sqlite3
 import urllib.request
 import urllib.error
 import urllib.parse
-from datetime import datetime, date, timedelta, timezone
+from datetime import datetime, date, timedelta
 
 # ---------------------------------------------------------------------------
 # Constants

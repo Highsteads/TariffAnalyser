@@ -13,7 +13,7 @@ import os
 import sqlite3
 import urllib.request
 import urllib.error
-from datetime import datetime, date, timedelta, timezone
+from datetime import datetime, timedelta
 
 # Octopus public API base
 _API_BASE = "https://api.octopus.energy/v1"

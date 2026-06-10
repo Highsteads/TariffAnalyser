@@ -230,7 +230,6 @@ def generate_savings_summary(db_path, output_dir, export_rate_p=12.0, log_fn=Non
 
     Returns (path, error_string).
     """
-    import calendar as _cal
 
     def _log(msg, level="INFO"):
         if log_fn:

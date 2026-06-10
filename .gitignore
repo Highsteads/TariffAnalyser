@@ -11,3 +11,6 @@ Contents/Packages/
 # Claude Code context file — local only
 CLAUDE.md
 *.zip
+
+# Test runner artefacts
+.pytest_cache/

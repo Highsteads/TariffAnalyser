@@ -8,7 +8,7 @@
 # Version:     1.0
 
 import sqlite3
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
 
 # ---------------------------------------------------------------------------
 # Tariff definitions

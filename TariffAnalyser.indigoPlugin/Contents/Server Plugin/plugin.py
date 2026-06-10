@@ -5,8 +5,8 @@
 #              half-hourly energy data from SigenEnergyManager.
 #              Outputs HTML reports that open in the default browser.
 # Author:      CliveS & Claude Opus 4.7
-# Date:        23-05-2026
-# Version:     1.5
+# Date:        10-06-2026
+# Version:     1.6
 #
 # v1.4 (23-05-2026): Millisecond timestamp [HH:MM:SS.mmm] prefix on every
 # log line via plugin_utils.install_timestamp_filter() — matches Device
@@ -114,7 +114,6 @@ class Plugin(indigo.PluginBase):
         else:
             self._ts_filter = None
 
-        secrets_status = self._secrets_status_line()
         # Startup banner moved to showPluginInfo on demand (revised 25-May-2026 per Jay).
 
     def startup(self):
