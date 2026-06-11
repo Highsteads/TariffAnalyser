@@ -158,10 +158,8 @@ restarts. Defaults to ON.
 - **1.3** (23-05-2026) — PluginConfig fallback for all 7 Octopus credential keys; secrets-policy compliance. `IndigoSecrets.py` still takes precedence when set.
 - **1.2** — current SigenEnergyManager integration; daily auto-update at 02:00.
 
-## Author
+## Authors & licence
 
-CliveS & Claude Opus 4.7 — Medomsley, County Durham, England
+Vibed into existence by **CliveS**, who knew what he wanted, argued until he got it, and tested it on a real house. Typed at inhuman speed by **Claude** (Anthropic), who mostly did as it was told.
 
-## Licence
-
-Copyright 2026 CliveS. All rights reserved.
+© 2026 CliveS · [MIT licence](LICENSE) — copy it, fork it, bend it, break it, fix it, ship it. If it breaks, you get to keep both pieces.
