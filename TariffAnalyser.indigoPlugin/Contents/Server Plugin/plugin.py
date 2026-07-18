@@ -6,7 +6,20 @@
 #              Outputs HTML reports that open in the default browser.
 # Author:      CliveS & Claude Opus 4.8
 # Date:        18-07-2026
-# Version:     1.8
+# Version:     1.9
+#
+# v1.9 (18-07-2026) — deep-review IMPROVEMENTS batch:
+# - New "Test Octopus API Connection" menu item — checks the public Agile
+#   products endpoint + the discovered import/export product codes for the
+#   configured region, reports cached-price coverage and whether metered-data
+#   credentials are set. Confirms connectivity before running a comparison.
+# - The comparison report now states when the illustrative "typical" fixed
+#   tariffs (Go/Cosy/Flux/Ofgem cap/fixed suppliers) were last checked
+#   (REFERENCE_RATES_UPDATED) so a user knows how current they are, and that
+#   Tracker/Agile use live rates.
+# - Declined by design: a fully user-configurable tariff table (JSON) — a
+#   larger feature needing its own schema + validation UI; documented for a
+#   future release rather than rushed into this batch.
 #
 # v1.8 (18-07-2026) — deep-review TEST-BUILDOUT batch:
 # - New test_collector.py (12 tests): the pure helpers in daily_collector +
@@ -432,6 +445,36 @@ class Plugin(indigo.PluginBase):
                                self.pluginVersion, extras=extras)
         else:
             log(f"{self.pluginDisplayName} v{self.pluginVersion}")
+
+    def testOctopusApi(self, valuesDict=None, typeId=None):
+        """Menu: Test Octopus API Connection — checks the public Agile products
+        endpoint (no auth) and the discovered Agile import/export product codes,
+        so a user can confirm connectivity + region before running a comparison.
+        Full banner first (fleet convention) so the log dump is support-ready."""
+        if log_startup_banner:
+            log_startup_banner(self.pluginId, self.pluginDisplayName, self.pluginVersion)
+        region = self._region()
+        log(f"[APITest] Testing Octopus API for region {region} ...")
+        ok = True
+        for direction in ("import", "export"):
+            try:
+                code, tariff = octopus_prices._discover_product(region, direction, log)
+                if code:
+                    log(f"[APITest] Agile {direction}: product={code} tariff={tariff}")
+                else:
+                    log(f"[APITest] Agile {direction}: NO product discovered "
+                        f"(region {region}) — check region setting", level="WARNING")
+                    ok = False
+            except Exception as exc:
+                log(f"[APITest] Agile {direction} discovery FAILED: {exc}", level="ERROR")
+                ok = False
+        earliest_i, latest_i, earliest_e, latest_e = octopus_prices.get_coverage(
+            self._agile_db_path(), region)
+        log(f"[APITest] Cached Agile import: {earliest_i or '(none)'} .. {latest_i or '(none)'}")
+        log(f"[APITest] Cached Agile export: {earliest_e or '(none)'} .. {latest_e or '(none)'}")
+        creds = "yes" if self._have_octopus_creds() else "NO (metered consumption unavailable)"
+        log(f"[APITest] Metered-data credentials configured: {creds}")
+        log(f"[APITest] Result: {'PASSED' if ok else 'issues found — see warnings above'}")
 
     def menuToggleTimestamps(self):
         self.timestamp_enabled = not self.timestamp_enabled

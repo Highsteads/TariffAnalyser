@@ -237,6 +237,7 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
   <ul class="notes">
     <li>Comparison assumes identical energy consumption patterns across all tariffs.  Real savings on time-of-use tariffs (Go, Intelligent Go, Agile) may be higher because battery dispatch would be optimised for cheap windows.</li>
     <li>Every tariff is priced over the same set of half-hourly slots — those where all selected tariffs had a price — so the ranking is like-for-like.  The Coverage column shows each tariff's own data availability; when it is below 100% the £ totals are for the covered portion of the period.</li>
+    <li>Tracker and Agile use live rates.  The other tariffs (Go, Cosy, Flux, Ofgem cap, and the fixed suppliers) use illustrative "typical" published rates last checked {tariff_engine.REFERENCE_RATES_UPDATED} — treat them as a guide, not your exact contract.</li>
     <li>Standing charges use published rates and may differ from your actual contract.</li>
     <li>All costs include VAT at 5%.</li>
   </ul>

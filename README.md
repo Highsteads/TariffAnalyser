@@ -2,17 +2,18 @@
 
 Compares your real recorded energy flows against UK electricity tariffs to show what you would have paid on each tariff.
 
-Energy data is recorded every 30 minutes by the [SigenEnergyManager](https://github.com/Highsteads/SigenEnergyManager) plugin. TariffAnalyser reads that data and computes the cost under each tariff, then writes a CSV report you can open in LibreOffice or Numbers.
+Energy data is recorded every 30 minutes by the [SigenEnergyManager](https://github.com/Highsteads/SigenEnergyManager) plugin. TariffAnalyser reads that data and computes the cost under each tariff, then writes an HTML report that opens in your default browser.
 
 ## Features
 
 - Half-hourly comparison using your actual grid import, export, solar generation, and battery usage
 - Supports Octopus Tracker (actual per-slot prices), Go, Go Faster, Agile, Cosy, Economy 7, Ofgem SVT price cap, E.ON, EDF, and Scottish Power
+- **Fair like-for-like ranking** — every tariff is priced over the same set of half-hourly slots (those where all selected tariffs have a price), with the standing charge pro-rated to that set. A tariff with too little price data is flagged as insufficient rather than ranked misleadingly cheap
 - Export revenue comparison: Octopus Outgoing 12p, Agile Outgoing, SEG minimum, SEG typical
 - Octopus Agile prices fetched automatically from the public API (no credentials needed)
-- Reports generated as CSV, auto-opened in LibreOffice (Numbers fallback)
-- Schedulable actions: generate a report, update Agile price data
-- Menu items for on-demand use in Indigo
+- Reports generated as HTML, auto-opened in the default browser
+- Schedulable actions: generate a report, update Agile price data, refresh the daily summary
+- Menu items for on-demand use, including a Test Octopus API Connection check
 
 ## Requirements
 
@@ -79,19 +80,20 @@ Each report is a CSV named `tariff_report_YYYYMMDD_HHMMSS.csv`.
 
 | Menu item | What it does |
 |---|---|
-| Run Tariff Comparison Report | Opens a dialog to choose date range, generates and optionally opens the report |
-| Export Raw Half-Hourly Data | Dumps the entire timeseries as a flat CSV for external analysis |
-| Update Octopus Agile Price Data | Fetches missing Agile prices from the Octopus public API |
-| Show Data Coverage | Logs earliest and latest data dates plus row count |
-| Open Last Report | Re-opens the most recently generated report |
-| Show Plugin Info | Displays plugin version and path information |
+| Energy Summary | Savings summary (today / yesterday / this week / month / year) as an HTML page in your browser |
+| Tariff Comparison | Choose a lookback period; ranks every tariff by what your actual usage would have cost, opens the HTML report |
+| Test Octopus API Connection | Checks the Agile products endpoint, the discovered import/export product codes for your region, and cached-price coverage |
+| Toggle Timestamps in Log | Turns the `[HH:MM:SS.mmm]` log prefix on or off |
+| Show Plugin Info | Displays plugin version, paths, region, and credential status |
 
 ### Schedulable Actions
 
 | Action | Description |
 |---|---|
-| Generate Tariff Comparison Report | Generates a report for the last N days (30/60/90/180/365) |
-| Update Octopus Agile Price Data | Fetches missing Agile prices |
+| Generate Report | Generates a comparison report for the last N days |
+| Update Prices | Fetches missing Agile prices |
+| Update Daily Summary | Refreshes the rolling daily_summary from the Octopus API |
+| Energy Summary | Regenerates and opens the savings summary |
 
 ## Tariffs Covered
 
@@ -154,6 +156,9 @@ restarts. Defaults to ON.
 
 ## Version history
 
+- **1.9** (18-07-2026) — deep-review improvements: a Test Octopus API Connection menu item, and the report now states when the illustrative "typical" fixed tariffs were last checked (Tracker and Agile always use live rates).
+- **1.8** (18-07-2026) — deep-review test buildout: 27 tests covering the comparison arithmetic and the collector's time-of-use, gas and timezone helpers.
+- **1.7** (18-07-2026) — deep-review financial fixes. Tariffs are now ranked fairly over a common set of half-hourly slots so a tariff with patchy price data can no longer appear cheapest just because part of your usage was never counted. A missing Tracker rate no longer records a false £0 day, the Go and Flux "saving vs Tracker" figures now include the standing-charge difference, and the Octopus fetch windows were widened so the first slots of a day are not lost in British Summer Time. First test suite added.
 - **1.4** (23-05-2026) — millisecond timestamp `[HH:MM:SS.mmm]` prefix on every `self.logger` line via `plugin_utils.install_timestamp_filter()`; new "Toggle Timestamps in Log" menu item.
 - **1.3** (23-05-2026) — PluginConfig fallback for all 7 Octopus credential keys; secrets-policy compliance. `IndigoSecrets.py` still takes precedence when set.
 - **1.2** — current SigenEnergyManager integration; daily auto-update at 02:00.

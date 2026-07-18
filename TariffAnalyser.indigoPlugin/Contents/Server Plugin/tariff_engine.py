@@ -10,6 +10,12 @@
 import sqlite3
 from datetime import datetime, timedelta
 
+# The date the hardcoded "typical" fixed tariffs and standing charges below were
+# last checked. Tracker and Agile come from live data; the fixed reference rates
+# (Go, Cosy, Flux, Ofgem cap, E.ON/EDF/Scottish Power) are illustrative and drift
+# — surfaced in the report so a user knows how current they are.
+REFERENCE_RATES_UPDATED = "2026-05-02"
+
 # ---------------------------------------------------------------------------
 # Tariff definitions
 # Each tariff has a 'type' that controls how rates are calculated:
