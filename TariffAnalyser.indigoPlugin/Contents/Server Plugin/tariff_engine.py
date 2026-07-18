@@ -253,12 +253,16 @@ def run_comparison(
     # Compute calendar days in range
     days = (date_to - date_from).days + 1
 
-    # Accumulators: {tariff_key: {import_p, export_p, valid_slots}}
-    acc   = {k: {"import_p": 0.0, "export_p": 0.0, "valid_slots": 0}
+    # Accumulators: {tariff_key: {import_p, export_p, raw_valid}}
+    #   import_p / export_p accumulate ONLY on COMMON slots (see below).
+    #   raw_valid counts slots this tariff *could* price on its own, for display.
+    acc   = {k: {"import_p": 0.0, "export_p": 0.0, "raw_valid": 0}
              for k in import_tariff_keys}
-    monthly = {}   # {month_str: {tariff_key: net_cost_p}}
+    monthly        = {}   # {month_str: {tariff_key: net_energy_cost_p}} (common slots)
+    monthly_common = {}   # {month_str: common_slot_count}
     totals  = {"grid_import_kwh": 0.0, "grid_export_kwh": 0.0,
                "pv_kwh": 0.0, "home_kwh": 0.0}
+    common_slots = 0
 
     for row in rows:
         (slot_start, slot_end,
@@ -272,58 +276,81 @@ def run_comparison(
         totals["home_kwh"]        += home_kwh or 0.0
 
         month_str = slot_start[:7]  # 'YYYY-MM'
-        if month_str not in monthly:
-            monthly[month_str] = {k: 0.0 for k in import_tariff_keys}
+        monthly.setdefault(month_str, {k: 0.0 for k in import_tariff_keys})
+        monthly_common.setdefault(month_str, 0)
 
-        # Export revenue is the same regardless of import tariff
+        # Resolve every selected tariff's per-slot rate up front.
+        rates = {}
+        for key in import_tariff_keys:
+            tariff = IMPORT_TARIFFS[key]
+            if tariff["type"] == "variable_db":
+                rates[key] = tracker_p
+            else:
+                rates[key] = _import_rate_for_slot(slot_start, tariff, agile_import)
+            if rates[key] is not None:
+                acc[key]["raw_valid"] += 1
+
+        # FAIR COMPARISON: only price a slot into the totals when EVERY selected
+        # tariff has a rate for it. Tariffs summed over different slot sets are
+        # not comparable — a partial-coverage tariff (agile with a missing API
+        # price, tracker with a NULL DB price) would otherwise accumulate cost
+        # over fewer slots yet still pay a full standing charge, and be ranked
+        # cheapest purely because part of its usage was never counted.
+        if any(rates[key] is None for key in import_tariff_keys):
+            continue
+
+        common_slots += 1
+        monthly_common[month_str] += 1
+
+        # Export revenue is tariff-independent — computed once per common slot.
         exp_rate = _export_rate_for_slot(slot_start, export_tariff, agile_export)
         exp_rev  = (exp_kwh or 0.0) * (exp_rate or 0.0)
 
         for key in import_tariff_keys:
-            tariff = IMPORT_TARIFFS[key]
-            if tariff["type"] == "variable_db":
-                imp_rate = tracker_p
-            else:
-                imp_rate = _import_rate_for_slot(slot_start, tariff, agile_import)
+            cost = (imp_kwh or 0.0) * rates[key]
+            acc[key]["import_p"]     += cost
+            acc[key]["export_p"]     += exp_rev
+            monthly[month_str][key]  += cost - exp_rev
 
-            if imp_rate is None:
-                continue  # no data for this slot — skip
-
-            cost = (imp_kwh or 0.0) * imp_rate
-            acc[key]["import_p"]   += cost
-            acc[key]["export_p"]   += exp_rev
-            acc[key]["valid_slots"] += 1
-            monthly[month_str][key] += cost - exp_rev
+    total_slots   = len(rows)
+    coverage_pct  = round(common_slots / total_slots * 100.0, 1) if total_slots else 0.0
+    # Standing is charged per PRICED half-hour (1 slot = 1/48 of a day) so unit
+    # cost and standing sit on the same slot basis as the common comparison.
+    standing_days = common_slots / 48.0
 
     results = []
-    total_slots = len(rows)
     for key in import_tariff_keys:
         tariff = IMPORT_TARIFFS[key]
         a = acc[key]
-        standing = tariff.get("standing_p_day", 0.0) * days
+        standing = tariff.get("standing_p_day", 0.0) * standing_days
         net      = a["import_p"] - a["export_p"]
         total    = net + standing
-        coverage = (a["valid_slots"] / total_slots * 100.0) if total_slots else 0.0
+        own_cov  = (a["raw_valid"] / total_slots * 100.0) if total_slots else 0.0
         results.append({
-            "tariff_key":       key,
-            "tariff_name":      tariff["name"],
-            "import_cost_p":    round(a["import_p"],   2),
-            "export_revenue_p": round(a["export_p"],   2),
-            "net_cost_p":       round(net,              2),
-            "standing_charge_p": round(standing,        2),
-            "total_cost_p":     round(total,            2),
-            "coverage_pct":     round(coverage,         1),
+            "tariff_key":        key,
+            "tariff_name":       tariff["name"],
+            "import_cost_p":     round(a["import_p"],   2),
+            "export_revenue_p":  round(a["export_p"],   2),
+            "net_cost_p":        round(net,              2),
+            "standing_charge_p": round(standing,         2),
+            "total_cost_p":      round(total,            2),
+            "coverage_pct":      coverage_pct,             # common basis (same for all)
+            "own_coverage_pct":  round(own_cov,          1),  # this tariff's own data
         })
 
-    # Sort by total_cost_p ascending (cheapest first)
+    # Sort by total_cost_p ascending (cheapest first) — now a fair like-for-like
+    # ranking because every tariff is priced over the identical common slot set.
     results.sort(key=lambda r: r["total_cost_p"])
 
     return {
-        "slots":       total_slots,
-        "days":        days,
-        "results":     results,
-        "monthly":     monthly,
-        "raw_totals":  {k: round(v, 3) for k, v in totals.items()},
+        "slots":          total_slots,
+        "common_slots":   common_slots,
+        "coverage_pct":   coverage_pct,
+        "days":           days,
+        "results":        results,
+        "monthly":        monthly,
+        "monthly_common": monthly_common,
+        "raw_totals":     {k: round(v, 3) for k, v in totals.items()},
     }
 
 
@@ -431,8 +458,10 @@ def get_coverage(timeseries_db_path):
 
 def _load_timeseries(db_path, date_from, date_to):
     """Return list of rows from halfhourly table for the date range."""
-    if not db_path or not __import__('os').path.exists(db_path):
+    import os
+    if not db_path or not os.path.exists(db_path):
         return []
+    con = None
     try:
         con  = sqlite3.connect(db_path)
         rows = con.execute(
@@ -446,17 +475,24 @@ def _load_timeseries(db_path, date_from, date_to):
             (date_from.strftime("%Y-%m-%dT00:00:00"),
              (date_to + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00"))
         ).fetchall()
-        con.close()
         return rows
-    except Exception:
+    except sqlite3.Error:
+        # Expected: DB missing / locked / table absent -> empty result. Narrowed
+        # from bare `except Exception` so a real programming error (bad SQL,
+        # schema change) is NOT masked as a silent "no data" empty report.
         return []
+    finally:
+        if con is not None:
+            con.close()
 
 
 def _load_agile_prices(db_path, region, date_from, date_to, direction):
     """Return dict {slot_start_str: price_p} from agile_prices DB."""
+    import os
     table = "agile_import" if direction == "import" else "agile_export"
-    if not db_path or not __import__('os').path.exists(db_path):
+    if not db_path or not os.path.exists(db_path):
         return {}
+    con = None
     try:
         con  = sqlite3.connect(db_path)
         rows = con.execute(
@@ -466,7 +502,11 @@ def _load_agile_prices(db_path, region, date_from, date_to, direction):
              date_from.strftime("%Y-%m-%dT00:00:00"),
              (date_to + timedelta(days=1)).strftime("%Y-%m-%dT00:00:00"))
         ).fetchall()
-        con.close()
         return {r[0]: r[1] for r in rows}
-    except Exception:
+    except sqlite3.Error:
+        # Narrowed from bare `except Exception` — a genuine error must not be
+        # masked as "no agile prices" (which silently zeroes agile tariffs).
         return {}
+    finally:
+        if con is not None:
+            con.close()

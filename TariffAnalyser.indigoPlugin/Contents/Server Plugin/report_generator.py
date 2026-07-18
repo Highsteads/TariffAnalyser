@@ -27,11 +27,13 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
     filename  = f"tariff_comparison_{date_from}_{date_to}_{timestamp}.html"
     path      = os.path.join(output_dir, filename)
 
-    results   = comparison.get("results", [])
-    monthly   = comparison.get("monthly", {})
-    totals    = comparison.get("raw_totals", {})
-    slots     = comparison.get("slots", 0)
-    days      = comparison.get("days", 0)
+    results        = comparison.get("results", [])
+    monthly        = comparison.get("monthly", {})
+    monthly_common = comparison.get("monthly_common", {})
+    totals         = comparison.get("raw_totals", {})
+    slots          = comparison.get("slots", 0)
+    days           = comparison.get("days", 0)
+    coverage_pct   = comparison.get("coverage_pct", 100.0)
 
     tracker_row = next((r for r in results if r["tariff_key"] == "tracker"), None)
     baseline    = tracker_row["total_cost_p"] if tracker_row else 0.0
@@ -70,8 +72,22 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
           <td class="cost">{gbp(r['export_revenue_p'])}</td>
           <td class="cost">{gbp(r['standing_charge_p'])}</td>
           <td class="vs-cell">{vs}</td>
-          <td class="coverage">{r['coverage_pct']:.0f}%</td>
+          <td class="coverage">{r.get('own_coverage_pct', r['coverage_pct']):.0f}%</td>
         </tr>""")
+
+    # Coverage caveat — when the common priced slot set is < 100% of the period
+    # (e.g. Agile has gaps in its API prices), every tariff is priced over the
+    # SAME reduced set so the ranking stays fair, but the £ totals are for that
+    # covered fraction, not the whole period. Surface it prominently.
+    coverage_note = ""
+    if coverage_pct < 99.5:
+        coverage_note = (
+            f'<p class="note warn">Note: all tariffs were compared over the '
+            f'{coverage_pct:.0f}% of half-hourly slots for which every selected '
+            f'tariff had a price. The £ totals are for that covered portion of '
+            f'the period (the ranking is like-for-like). The Coverage column '
+            f'shows each tariff\'s own data availability.</p>'
+        )
 
     # --- monthly breakdown ----------------------------------------------
     monthly_html = ""
@@ -86,6 +102,13 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
             except ValueError:
                 m_label = month
             m_data = monthly[month]
+            # Skip months with no common priced slots — every tariff would show
+            # £0.00 and one would be spuriously highlighted as "cheapest".
+            if monthly_common.get(month, 1) <= 0:
+                cells = "".join('<td class="nodata">—</td>' for _ in tariff_keys)
+                rows.append(f'<tr><td class="month">{m_label}</td>{cells}'
+                            f'<td class="cheapest">— no data —</td></tr>')
+                continue
             min_key = min(tariff_keys, key=lambda k: m_data.get(k, 0.0))
             cells = []
             for k in tariff_keys:
@@ -174,6 +197,7 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
 
   <h2>Tariff ranking</h2>
   <p class="note">★ cheapest, ✘ most expensive.  Cost = import - export + standing charges.  Compared against Tracker (your current).</p>
+  {coverage_note}
   <table>
     <thead>
       <tr>
@@ -195,7 +219,7 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
   <h2>Notes</h2>
   <ul class="notes">
     <li>Comparison assumes identical energy consumption patterns across all tariffs.  Real savings on time-of-use tariffs (Go, Intelligent Go, Agile) may be higher because battery dispatch would be optimised for cheap windows.</li>
-    <li>Agile coverage below 100% means price data was missing for some slots; those slots are excluded from the Agile cost.</li>
+    <li>Every tariff is priced over the same set of half-hourly slots — those where all selected tariffs had a price — so the ranking is like-for-like.  The Coverage column shows each tariff's own data availability; when it is below 100% the £ totals are for the covered portion of the period.</li>
     <li>Standing charges use published rates and may differ from your actual contract.</li>
     <li>All costs include VAT at 5%.</li>
   </ul>

@@ -4,9 +4,35 @@
 # Description: TariffAnalyser - compares UK energy tariffs against recorded
 #              half-hourly energy data from SigenEnergyManager.
 #              Outputs HTML reports that open in the default browser.
-# Author:      CliveS & Claude Opus 4.7
-# Date:        10-06-2026
-# Version:     1.6
+# Author:      CliveS & Claude Opus 4.8
+# Date:        18-07-2026
+# Version:     1.7
+#
+# v1.7 (18-07-2026) — deep-review FINANCIAL-FIX batch:
+# - FAIR COMPARISON (flagship): run_comparison now prices every selected tariff
+#   over a COMMON slot set — the slots where ALL selected tariffs have a rate —
+#   with the standing charge pro-rated to that set (1 priced half-hour = 1/48
+#   day). Previously a partial-coverage tariff (Agile with a missing API price,
+#   Tracker with a NULL DB price) accumulated its import cost over FEWER slots
+#   yet paid a full standing charge and was ranked cheapest purely because part
+#   of its usage was never counted. Export revenue (tariff-independent) is now
+#   also counted once per common slot for all tariffs. Each result carries both
+#   the common coverage and the tariff's own_coverage_pct; the report shows a
+#   caveat when coverage < 100% and no longer highlights a no-data month as £0.
+# - The two SQLite loaders in tariff_engine (and get_coverage/_existing_slots in
+#   octopus_prices) narrowed from bare `except Exception` to `except sqlite3.Error`
+#   with the connection closed in finally — a real schema/programming error no
+#   longer masquerades as a silent empty report, and the connection isn't leaked.
+# - daily_collector: a missing Tracker rate now writes NULL for the import-cost
+#   columns instead of a real-looking £0 day; Go/Flux "saving vs Tracker" folds
+#   each tariff's own standing charge in (like-for-like); the Octopus consumption
+#   and gas fetch windows widened an hour each side so the earliest local day's
+#   00:00/00:30 slots are not dropped across the BST boundary.
+# - Energy Summary export rate now follows the configured export tariff instead
+#   of a hardcoded 12p.
+# - octopus_prices._discover_product picks the most recent matching product
+#   (not the first the API returns) and logs when several match.
+# - First-ever test suite: test_tariff_engine.py, 14 tests.
 #
 # v1.4 (23-05-2026): Millisecond timestamp [HH:MM:SS.mmm] prefix on every
 # log line via plugin_utils.install_timestamp_filter() — matches Device
@@ -173,6 +199,14 @@ class Plugin(indigo.PluginBase):
 
     def _export_tariff_key(self):
         return self.pluginPrefs.get("exportTariffKey", "outgoing_12p")
+
+    def _export_rate_flat_p(self):
+        """Flat export rate (p/kWh) for the configured export tariff, for the
+        savings summary. Agile Outgoing has no single flat rate, so fall back
+        to Octopus Outgoing 12p."""
+        tariff = tariff_engine.EXPORT_TARIFFS.get(self._export_tariff_key(), {})
+        rate = tariff.get("rate_p")
+        return float(rate) if rate is not None else 12.0
 
     def _gas_unit_rate(self):
         try:
@@ -355,7 +389,8 @@ class Plugin(indigo.PluginBase):
 
         log("[Savings] Generating savings summary...")
         path, err = report_generator.generate_savings_summary(
-            db_path, self._output_dir(), export_rate_p=12.0, log_fn=log,
+            db_path, self._output_dir(),
+            export_rate_p=self._export_rate_flat_p(), log_fn=log,
         )
         if err:
             log(f"[Savings] Failed: {err}", level="ERROR")

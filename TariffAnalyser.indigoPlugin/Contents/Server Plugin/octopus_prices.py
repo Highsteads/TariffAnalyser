@@ -81,6 +81,7 @@ def get_coverage(db_path, region):
     """Return (earliest_import, latest_import, earliest_export, latest_export)."""
     if not os.path.exists(db_path):
         return None, None, None, None
+    con = None
     try:
         con = sqlite3.connect(db_path)
         imp = con.execute(
@@ -91,10 +92,14 @@ def get_coverage(db_path, region):
             "SELECT MIN(slot_start), MAX(slot_start) FROM agile_export WHERE region=?",
             (region,)
         ).fetchone()
-        con.close()
         return (imp[0], imp[1], exp[0], exp[1]) if imp else (None, None, None, None)
-    except Exception:
+    except sqlite3.Error:
+        # Narrowed from bare Exception; connection closed in finally (was leaked
+        # on the error path before).
         return None, None, None, None
+    finally:
+        if con is not None:
+            con.close()
 
 
 # ---------------------------------------------------------------------------
@@ -172,12 +177,23 @@ def _discover_product(region, direction, log_fn):
     try:
         url  = f"{_API_BASE}/products/?is_variable=true&brand=OCTOPUS_ENERGY"
         data = _api_get(url)
+        # Collect every candidate whose display name contains the keyword, then
+        # pick the most RECENT (max available_from) rather than the first the
+        # API happens to return — Octopus lists retired Agile products too, and
+        # taking the first could pin an old tariff code.
+        candidates = []
         for product in data.get("results", []):
             if keyword.lower() in product.get("display_name", "").lower():
-                code = product["code"]
-                # Tariff code pattern: E-1R-{CODE}-{REGION}
-                tariff = f"E-1R-{code}-{region}"
-                return code, tariff
+                candidates.append(product)
+        if not candidates:
+            return None, None
+        candidates.sort(key=lambda p: p.get("available_from", "") or "", reverse=True)
+        if len(candidates) > 1:
+            log_fn(f"Agile {direction}: {len(candidates)} product candidates matched "
+                   f"'{keyword}' — using most recent {candidates[0].get('code')}")
+        code   = candidates[0]["code"]
+        tariff = f"E-1R-{code}-{region}"   # tariff code pattern
+        return code, tariff
     except Exception as exc:
         log_fn(f"Product discovery failed: {exc}", level="WARNING")
     return None, None
@@ -188,15 +204,18 @@ def _existing_slots(db_path, region, direction):
     table = "agile_import" if direction == "import" else "agile_export"
     if not os.path.exists(db_path):
         return set()
+    con = None
     try:
         con   = sqlite3.connect(db_path)
         rows  = con.execute(
             f"SELECT slot_start FROM {table} WHERE region=?", (region,)
         ).fetchall()
-        con.close()
         return {r[0] for r in rows}
-    except Exception:
+    except sqlite3.Error:
         return set()
+    finally:
+        if con is not None:
+            con.close()
 
 
 def _build_periods(date_from, date_to, existing_slots):

@@ -214,28 +214,46 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
         billing_imp_kwh = oct_imp_kwh if oct_elec_ok else imp_kwh
         billing_exp_kwh = oct_exp_kwh if oct_exp_slots else exp_kwh
 
-        # Electricity costs on Tracker
-        elec_imp_cost_p = billing_imp_kwh * (tracker_p or 0.0)
-        elec_exp_rev_p  = billing_exp_kwh * EXPORT_RATE_P
-        elec_net_p      = elec_imp_cost_p - elec_exp_rev_p
-        elec_total_p    = elec_net_p + ELEC_STANDING_P_DAY
+        # Electricity costs on Tracker — export revenue is always known (flat
+        # rate), but import cost needs the Tracker rate. When the rate is
+        # missing we write NULL for the import-derived fields rather than a
+        # real-looking £0 day (a missing rate must be distinguishable from a
+        # genuinely zero-cost day).
+        elec_exp_rev_p = billing_exp_kwh * EXPORT_RATE_P
+        if tracker_p is not None:
+            elec_imp_cost_p = billing_imp_kwh * tracker_p
+            elec_net_p      = elec_imp_cost_p - elec_exp_rev_p
+            elec_total_p    = elec_net_p + ELEC_STANDING_P_DAY
+        else:
+            elec_imp_cost_p = None
+            elec_net_p      = None
+            elec_total_p    = None
 
         # Savings vs no solar — only meaningful from solar install date
         if cur >= SOLAR_INSTALL_DATE and tracker_p and home_kwh > 0:
             cost_no_solar_p    = home_kwh * tracker_p
             savings_p          = (cost_no_solar_p - elec_imp_cost_p) + elec_exp_rev_p
-        else:
-            cost_no_solar_p    = billing_imp_kwh * (tracker_p or 0.0)
+        elif tracker_p is not None:
+            cost_no_solar_p    = billing_imp_kwh * tracker_p
             savings_p          = 0.0
+        else:
+            cost_no_solar_p    = None
+            savings_p          = None
 
-        # Go cost — apply TOU to Octopus half-hourly slots
+        # Go cost — apply TOU to Octopus half-hourly slots. "Saving vs Tracker"
+        # folds each tariff's OWN standing charge into the total so the two
+        # tariffs are compared like-for-like (Go/Flux standing < Tracker's, so
+        # ignoring it understated the real saving).
         go_imp_p = None
         if oct_imp_slots:
             go_imp_p = _apply_tou_simple(
                 oct_imp_slots, GO_CHEAP_START, GO_CHEAP_END, GO_CHEAP_P, GO_PEAK_P
             )
-        go_net_p          = (go_imp_p - elec_exp_rev_p) if go_imp_p is not None else None
-        go_save_p         = (elec_imp_cost_p - go_imp_p) if go_imp_p is not None else None
+        go_net_p    = (go_imp_p - elec_exp_rev_p) if go_imp_p is not None else None
+        go_save_p   = (
+            (elec_imp_cost_p + ELEC_STANDING_P_DAY) - (go_imp_p + GO_STANDING_P_DAY)
+            if (go_imp_p is not None and elec_imp_cost_p is not None) else None
+        )
 
         # Flux cost — apply 3-band TOU
         flux_op  = flux_rates.get("offpeak_p", FLUX_OFFPEAK_P)
@@ -244,8 +262,11 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
         flux_imp_p = None
         if oct_imp_slots:
             flux_imp_p = _apply_tou_flux(oct_imp_slots, flux_op, flux_sh, flux_pk)
-        flux_net_p        = (flux_imp_p - elec_exp_rev_p) if flux_imp_p is not None else None
-        flux_save_p       = (elec_imp_cost_p - flux_imp_p) if flux_imp_p is not None else None
+        flux_net_p    = (flux_imp_p - elec_exp_rev_p) if flux_imp_p is not None else None
+        flux_save_p   = (
+            (elec_imp_cost_p + ELEC_STANDING_P_DAY) - (flux_imp_p + FLUX_STANDING_P_DAY)
+            if (flux_imp_p is not None and elec_imp_cost_p is not None) else None
+        )
 
         # Gas — _fetch_octopus_gas already converts m3 → kWh
         gas_kwh  = gas_daily.get(ds)
@@ -567,8 +588,12 @@ def _fetch_octopus_consumption(api_key, mpan, serial, direction, date_from, date
     if not api_key or not mpan or not serial:
         return {}
 
-    period_from = f"{date_from.isoformat()}T00:00:00Z"
-    period_to   = f"{(date_to + timedelta(days=1)).isoformat()}T00:00:00Z"
+    # Widen the UTC request window by an hour each side so the first local slots
+    # (00:00 & 00:30) of the earliest day are not dropped in BST, when local
+    # midnight is 23:00Z the previous day. Local-date bucketing below discards
+    # any out-of-range days the widening pulls in.
+    period_from = f"{(date_from - timedelta(days=1)).isoformat()}T23:00:00Z"
+    period_to   = f"{(date_to + timedelta(days=1)).isoformat()}T01:00:00Z"
 
     url = (
         f"{_API_BASE}/electricity-meter-points/{mpan}/"
@@ -618,8 +643,10 @@ def _fetch_octopus_gas(api_key, mprn, gas_serial, date_from, date_to, log_fn):
     if not api_key or not mprn or not gas_serial:
         return {}
 
-    period_from = f"{date_from.isoformat()}T00:00:00Z"
-    period_to   = f"{(date_to + timedelta(days=1)).isoformat()}T00:00:00Z"
+    # Widen the window an hour each side (see _fetch_octopus_consumption) so the
+    # earliest local day's first slots aren't lost across the BST boundary.
+    period_from = f"{(date_from - timedelta(days=1)).isoformat()}T23:00:00Z"
+    period_to   = f"{(date_to + timedelta(days=1)).isoformat()}T01:00:00Z"
 
     url = (
         f"{_API_BASE}/gas-meter-points/{mprn}/"
