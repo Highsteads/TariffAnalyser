@@ -35,11 +35,16 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
     days           = comparison.get("days", 0)
     coverage_pct   = comparison.get("coverage_pct", 100.0)
 
-    tracker_row = next((r for r in results if r["tariff_key"] == "tracker"), None)
+    # Ranked tariffs (had enough data to compare); insufficient ones are shown
+    # separately below, never mixed into the ranking.
+    ranked_results = [r for r in results if not r.get("insufficient_data")]
+    insufficient   = [r for r in results if r.get("insufficient_data")]
+
+    tracker_row = next((r for r in ranked_results if r["tariff_key"] == "tracker"), None)
     baseline    = tracker_row["total_cost_p"] if tracker_row else 0.0
 
-    # Sort cheapest -> most expensive
-    ranked = sorted(results, key=lambda r: r["total_cost_p"])
+    # engine already returns ranked_results cheapest-first; keep that order
+    ranked = ranked_results
 
     def gbp(pence):
         return f"£{pence / 100.0:.2f}"
@@ -75,6 +80,18 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
           <td class="coverage">{r.get('own_coverage_pct', r['coverage_pct']):.0f}%</td>
         </tr>""")
 
+    # Insufficient-data tariffs — shown greyed below the ranking with their own
+    # coverage, so a tariff with too little price data (e.g. Agile not yet
+    # fetched) is surfaced honestly rather than silently dropped or ranked £0.
+    for r in insufficient:
+        summary_rows.append(f"""
+        <tr class="rank-row insufficient">
+          <td class="rank">—</td>
+          <td class="name">{r['tariff_name']}</td>
+          <td class="cost total" colspan="5">insufficient price data to rank</td>
+          <td class="coverage">{r.get('own_coverage_pct', 0):.0f}%</td>
+        </tr>""")
+
     # Coverage caveat — when the common priced slot set is < 100% of the period
     # (e.g. Agile has gaps in its API prices), every tariff is priced over the
     # SAME reduced set so the ranking stays fair, but the £ totals are for that
@@ -92,8 +109,8 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
     # --- monthly breakdown ----------------------------------------------
     monthly_html = ""
     if monthly:
-        tariff_keys  = [r["tariff_key"]  for r in results]
-        tariff_names = [r["tariff_name"] for r in results]
+        tariff_keys  = [r["tariff_key"]  for r in ranked_results]
+        tariff_names = [r["tariff_name"] for r in ranked_results]
         header_cells = "".join(f"<th>{n}</th>" for n in tariff_names)
         rows = []
         for month in sorted(monthly.keys()):

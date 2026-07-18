@@ -253,33 +253,22 @@ def run_comparison(
     # Compute calendar days in range
     days = (date_to - date_from).days + 1
 
-    # Accumulators: {tariff_key: {import_p, export_p, raw_valid}}
-    #   import_p / export_p accumulate ONLY on COMMON slots (see below).
-    #   raw_valid counts slots this tariff *could* price on its own, for display.
-    acc   = {k: {"import_p": 0.0, "export_p": 0.0, "raw_valid": 0}
-             for k in import_tariff_keys}
-    monthly        = {}   # {month_str: {tariff_key: net_energy_cost_p}} (common slots)
-    monthly_common = {}   # {month_str: common_slot_count}
     totals  = {"grid_import_kwh": 0.0, "grid_export_kwh": 0.0,
                "pv_kwh": 0.0, "home_kwh": 0.0}
-    common_slots = 0
 
+    # --- Pass 1: resolve every tariff's per-slot rate and count own coverage ---
+    slot_rates = []   # [(slot_start, imp_kwh, exp_kwh, {key: rate}), ...]
+    raw_valid  = {k: 0 for k in import_tariff_keys}
     for row in rows:
         (slot_start, slot_end,
          imp_kwh, exp_kwh, pv_kwh, home_kwh,
          soc_start, soc_end, bat_net,
          tracker_p, action) = row
-
         totals["grid_import_kwh"] += imp_kwh or 0.0
         totals["grid_export_kwh"] += exp_kwh or 0.0
         totals["pv_kwh"]          += pv_kwh  or 0.0
         totals["home_kwh"]        += home_kwh or 0.0
 
-        month_str = slot_start[:7]  # 'YYYY-MM'
-        monthly.setdefault(month_str, {k: 0.0 for k in import_tariff_keys})
-        monthly_common.setdefault(month_str, 0)
-
-        # Resolve every selected tariff's per-slot rate up front.
         rates = {}
         for key in import_tariff_keys:
             tariff = IMPORT_TARIFFS[key]
@@ -288,44 +277,62 @@ def run_comparison(
             else:
                 rates[key] = _import_rate_for_slot(slot_start, tariff, agile_import)
             if rates[key] is not None:
-                acc[key]["raw_valid"] += 1
+                raw_valid[key] += 1
+        slot_rates.append((slot_start, imp_kwh, exp_kwh, rates))
 
-        # FAIR COMPARISON: only price a slot into the totals when EVERY selected
-        # tariff has a rate for it. Tariffs summed over different slot sets are
-        # not comparable — a partial-coverage tariff (agile with a missing API
-        # price, tracker with a NULL DB price) would otherwise accumulate cost
-        # over fewer slots yet still pay a full standing charge, and be ranked
-        # cheapest purely because part of its usage was never counted.
-        if any(rates[key] is None for key in import_tariff_keys):
+    total_slots = len(rows)
+
+    # A tariff must have data for at least RANK_MIN_COVERAGE of the period to be
+    # RANKED — otherwise (e.g. Agile with no cached prices) it would drag the
+    # common comparison set to near-zero and collapse every tariff to £0. Such
+    # tariffs are surfaced separately as "insufficient data", not ranked.
+    RANK_MIN_COVERAGE = 0.5
+    ranked_keys = [k for k in import_tariff_keys
+                   if total_slots and raw_valid[k] / total_slots >= RANK_MIN_COVERAGE]
+    # If nothing clears the bar, fall back to any tariff with SOME data so the
+    # report is not empty.
+    if not ranked_keys:
+        ranked_keys = [k for k in import_tariff_keys if raw_valid[k] > 0]
+
+    # --- Pass 2: price the ranked tariffs over their COMMON slot set ---
+    # FAIR COMPARISON: only price a slot into the totals when EVERY ranked tariff
+    # has a rate for it. Tariffs summed over different slot sets are not
+    # comparable — a partial-coverage tariff would otherwise accumulate cost over
+    # fewer slots yet pay a full standing charge and rank cheapest purely because
+    # part of its usage was never counted.
+    acc   = {k: {"import_p": 0.0, "export_p": 0.0} for k in ranked_keys}
+    monthly        = {}   # {month_str: {tariff_key: net_energy_cost_p}} (common slots)
+    monthly_common = {}   # {month_str: common_slot_count}
+    common_slots   = 0
+    for (slot_start, imp_kwh, exp_kwh, rates) in slot_rates:
+        month_str = slot_start[:7]
+        monthly.setdefault(month_str, {k: 0.0 for k in ranked_keys})
+        monthly_common.setdefault(month_str, 0)
+        if any(rates[k] is None for k in ranked_keys):
             continue
-
         common_slots += 1
         monthly_common[month_str] += 1
-
-        # Export revenue is tariff-independent — computed once per common slot.
         exp_rate = _export_rate_for_slot(slot_start, export_tariff, agile_export)
         exp_rev  = (exp_kwh or 0.0) * (exp_rate or 0.0)
-
-        for key in import_tariff_keys:
+        for key in ranked_keys:
             cost = (imp_kwh or 0.0) * rates[key]
-            acc[key]["import_p"]     += cost
-            acc[key]["export_p"]     += exp_rev
-            monthly[month_str][key]  += cost - exp_rev
+            acc[key]["import_p"]    += cost
+            acc[key]["export_p"]    += exp_rev
+            monthly[month_str][key] += cost - exp_rev
 
-    total_slots   = len(rows)
     coverage_pct  = round(common_slots / total_slots * 100.0, 1) if total_slots else 0.0
     # Standing is charged per PRICED half-hour (1 slot = 1/48 of a day) so unit
     # cost and standing sit on the same slot basis as the common comparison.
     standing_days = common_slots / 48.0
 
     results = []
-    for key in import_tariff_keys:
+    for key in ranked_keys:
         tariff = IMPORT_TARIFFS[key]
         a = acc[key]
         standing = tariff.get("standing_p_day", 0.0) * standing_days
         net      = a["import_p"] - a["export_p"]
         total    = net + standing
-        own_cov  = (a["raw_valid"] / total_slots * 100.0) if total_slots else 0.0
+        own_cov  = (raw_valid[key] / total_slots * 100.0) if total_slots else 0.0
         results.append({
             "tariff_key":        key,
             "tariff_name":       tariff["name"],
@@ -336,11 +343,33 @@ def run_comparison(
             "total_cost_p":      round(total,            2),
             "coverage_pct":      coverage_pct,             # common basis (same for all)
             "own_coverage_pct":  round(own_cov,          1),  # this tariff's own data
+            "insufficient_data": False,
         })
 
-    # Sort by total_cost_p ascending (cheapest first) — now a fair like-for-like
-    # ranking because every tariff is priced over the identical common slot set.
+    # Sort ranked tariffs by total_cost_p ascending (cheapest first) — a fair
+    # like-for-like ranking because every ranked tariff is priced over the
+    # identical common slot set.
     results.sort(key=lambda r: r["total_cost_p"])
+
+    # Append the excluded (insufficient-data) tariffs so the report can show
+    # them below the ranking with their own coverage, not silently drop them.
+    for key in import_tariff_keys:
+        if key in ranked_keys:
+            continue
+        tariff  = IMPORT_TARIFFS[key]
+        own_cov = (raw_valid[key] / total_slots * 100.0) if total_slots else 0.0
+        results.append({
+            "tariff_key":        key,
+            "tariff_name":       tariff["name"],
+            "import_cost_p":     None,
+            "export_revenue_p":  None,
+            "net_cost_p":        None,
+            "standing_charge_p": None,
+            "total_cost_p":      None,
+            "coverage_pct":      coverage_pct,
+            "own_coverage_pct":  round(own_cov, 1),
+            "insufficient_data": True,
+        })
 
     return {
         "slots":          total_slots,

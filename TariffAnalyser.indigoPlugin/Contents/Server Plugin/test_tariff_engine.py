@@ -178,6 +178,29 @@ class TestRunComparisonFairness(unittest.TestCase):
         self.assertEqual(by["agile"]["own_coverage_pct"], 50.0)
         self.assertEqual(by["ofgem_cap"]["own_coverage_pct"], 100.0)
 
+    def test_zero_coverage_tariff_excluded_not_collapsing_others(self):
+        """REGRESSION (v1.7): a selected tariff with NO price data (Agile with
+        no cached prices) must be flagged insufficient and EXCLUDED, not drag
+        every other tariff's common set to zero and collapse them all to £0."""
+        ts = _make_timeseries(self.tmp, _full_day(imp=1.0, tracker_p=30.0))
+        ag = _make_agile(self.tmp, {})   # no agile prices at all
+        r = te.run_comparison(ts, ag, "F", date(2026, 7, 1), date(2026, 7, 1),
+                              import_tariff_keys=["tracker", "agile", "ofgem_cap"],
+                              export_tariff_key="outgoing_12p")
+        # tracker + ofgem still compared fairly over the full 48 slots
+        self.assertEqual(r["common_slots"], 48)
+        by = {x["tariff_key"]: x for x in r["results"]}
+        self.assertFalse(by["tracker"]["insufficient_data"])
+        self.assertFalse(by["ofgem_cap"]["insufficient_data"])
+        self.assertAlmostEqual(by["ofgem_cap"]["total_cost_p"], 1237.64, places=1)
+        # agile flagged insufficient with a None total, not £0 or ranked
+        self.assertTrue(by["agile"]["insufficient_data"])
+        self.assertIsNone(by["agile"]["total_cost_p"])
+        self.assertEqual(by["agile"]["own_coverage_pct"], 0.0)
+        # the ranked set (non-insufficient) is what's ordered/crowned
+        ranked = [x for x in r["results"] if not x["insufficient_data"]]
+        self.assertEqual(ranked[0]["tariff_key"], "ofgem_cap")
+
     def test_export_revenue_shared_equally(self):
         """Export revenue is tariff-independent — every tariff must net the same
         export credit over the common slots (was dropped for skipped slots)."""

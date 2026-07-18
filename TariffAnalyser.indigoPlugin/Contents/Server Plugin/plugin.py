@@ -507,7 +507,8 @@ class Plugin(indigo.PluginBase):
         slots   = comparison.get("slots", 0)
         days    = comparison.get("days", 0)
 
-        tracker_row = next((r for r in results if r["tariff_key"] == "tracker"), None)
+        ranked      = [r for r in results if not r.get("insufficient_data")]
+        tracker_row = next((r for r in ranked if r["tariff_key"] == "tracker"), None)
         baseline_p  = tracker_row["total_cost_p"] if tracker_row else 0.0
 
         log(f"[Compare] {date_from} to {date_to} | {days} days | {slots} slots")
@@ -516,10 +517,14 @@ class Plugin(indigo.PluginBase):
             f"PV: {totals.get('pv_kwh', 0):.1f} kWh")
         log(f"[Compare] {'Tariff':<35} {'Cost':>8}  {'vs Tracker':>12}  {'Cover':>6}")
         log(f"[Compare] {'-'*65}")
-        for r in results:
+        for r in ranked:
             total_gbp  = r["total_cost_p"] / 100.0
             diff_gbp   = (r["total_cost_p"] - baseline_p) / 100.0
             diff_str   = f"{diff_gbp:+.2f}"
             marker     = " <<" if r["tariff_key"] == "tracker" else ""
             log(f"[Compare] {r['tariff_name']:<35} GBP{total_gbp:>6.2f}  "
-                f"{diff_str:>12}  {r['coverage_pct']:>5.0f}%{marker}")
+                f"{diff_str:>12}  {r.get('own_coverage_pct', r['coverage_pct']):>5.0f}%{marker}")
+        for r in results:
+            if r.get("insufficient_data"):
+                log(f"[Compare] {r['tariff_name']:<35} {'(insufficient data)':>22}  "
+                    f"{r.get('own_coverage_pct', 0):>5.0f}%")
