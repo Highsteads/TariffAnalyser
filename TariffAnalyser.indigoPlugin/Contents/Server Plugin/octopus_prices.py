@@ -38,13 +38,10 @@ def init_agile_db(db_path):
             price_p     REAL NOT NULL,
             PRIMARY KEY (slot_start, region)
         );
-        CREATE TABLE IF NOT EXISTS fetch_log (
-            direction   TEXT NOT NULL,
-            region      TEXT NOT NULL,
-            fetched_to  TEXT NOT NULL,
-            PRIMARY KEY (direction, region)
-        );
     """)
+    # NB: a fetch_log table was declared here historically but never read or
+    # written — removed (re-fetch is driven by _build_periods counting existing
+    # slots). Existing DBs keep the empty table harmlessly.
     con.commit()
     con.close()
 

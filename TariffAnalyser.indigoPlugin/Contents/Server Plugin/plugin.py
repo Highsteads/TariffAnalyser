@@ -6,7 +6,21 @@
 #              Outputs HTML reports that open in the default browser.
 # Author:      CliveS & Claude Opus 4.8
 # Date:        18-07-2026
-# Version:     1.7
+# Version:     1.8
+#
+# v1.8 (18-07-2026) — deep-review TEST-BUILDOUT batch:
+# - New test_collector.py (12 tests): the pure helpers in daily_collector +
+#   octopus_prices — TOU band assignment (Go two-band, Flux three-band),
+#   _in_window daytime + overnight boundaries, the gas m3->kWh constant, UTC->
+#   local conversion across the BST and GMT boundaries (TZ pinned to
+#   Europe/London so it's deterministic), and the Agile re-fetch period builder.
+#   Suite 15 -> 27.
+# - Removed the dead fetch_log table from the agile DB schema (declared but
+#   never read or written).
+# - Declined by design: INSERT OR IGNORE for cached Agile prices is kept (a
+#   published Agile price is final, so never overwrite it on a re-fetch); the
+#   in-memory _last_auto_update flag is kept (the nightly update is idempotent,
+#   so a rare restart-during-02:00 re-run is harmless).
 #
 # v1.7 (18-07-2026) — deep-review FINANCIAL-FIX batch:
 # - FAIR COMPARISON (flagship): run_comparison now prices every selected tariff
