@@ -6,7 +6,13 @@
 #              Outputs HTML reports that open in the default browser.
 # Author:      CliveS & Claude Opus 4.8
 # Date:        18-07-2026
-# Version:     1.9
+# Version:     1.9.1
+#
+# v1.9.1 (21-07-2026): LOG-LEVEL FIX. indigo.server.log(level=...) wants a Python
+# logging INT — a STRING is silently ignored and the line logs as plain Info.
+# The log() helper passed its level name straight through, so every WARNING and
+# ERROR raised through it had been appearing as an ordinary Info line. Added
+# _lvl() to map the name to a real level. Estate-wide sweep (38 files).
 #
 # v1.9 (18-07-2026) — deep-review IMPROVEMENTS batch:
 # - New "Test Octopus API Connection" menu item — checks the public Agile
@@ -145,9 +151,33 @@ DEFAULT_DB_PATH = os.path.join(_SIGEN_PREFS, "energy_timeseries.db")
 DEFAULT_REGION = "F"
 
 
+import logging
+
+
+_LOG_LEVELS = {
+    "DEBUG":   logging.DEBUG,
+    "INFO":    logging.INFO,
+    "WARNING": logging.WARNING,
+    "ERROR":   logging.ERROR,
+    "CRITICAL": logging.CRITICAL,
+}
+
+
+def _lvl(level):
+    """Map a level NAME to a Python logging int.
+
+    indigo.server.log(level=...) wants an int. A STRING is silently ignored
+    and the line logs as plain Info, which hid every WARNING and ERROR raised
+    through log() until this was corrected (21-07-2026).
+    """
+    if isinstance(level, int):
+        return level
+    return _LOG_LEVELS.get(str(level).upper(), logging.INFO)
+
+
 def log(message, level="INFO"):
     indigo.server.log(f"[{datetime.now().strftime('%H:%M:%S.%f')[:-3]}] {message}",
-                      level=level)
+                      level=_lvl(level))
 
 
 class Plugin(indigo.PluginBase):
