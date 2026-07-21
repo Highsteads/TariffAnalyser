@@ -2,7 +2,7 @@
 
 Compares your real recorded energy flows against UK electricity tariffs to show what you would have paid on each tariff.
 
-Energy data is recorded every 30 minutes by the [SigenEnergyManager](https://github.com/Highsteads/SigenEnergyManager) plugin. TariffAnalyser reads that data and computes the cost under each tariff, then writes an HTML report that opens in your default browser.
+The [SigenEnergyManager](https://github.com/Highsteads/SigenEnergyManager) plugin records your energy flows every 30 minutes. TariffAnalyser reads that record, works out what each tariff would have cost you, and writes an HTML report that opens in your browser.
 
 ## Features
 
@@ -11,7 +11,7 @@ Energy data is recorded every 30 minutes by the [SigenEnergyManager](https://git
 - **Fair like-for-like ranking** — every tariff is priced over the same set of half-hourly slots (those where all selected tariffs have a price), with the standing charge pro-rated to that set. A tariff with too little price data is flagged as insufficient rather than ranked misleadingly cheap
 - Export revenue comparison: Octopus Outgoing 12p, Agile Outgoing, SEG minimum, SEG typical
 - Octopus Agile prices fetched automatically from the public API (no credentials needed)
-- Reports generated as HTML, auto-opened in the default browser
+- Reports come out as HTML and open in your browser
 - Schedulable actions: generate a report, update Agile price data, refresh the daily summary
 - Menu items for on-demand use, including a Test Octopus API Connection check
 
@@ -19,7 +19,7 @@ Energy data is recorded every 30 minutes by the [SigenEnergyManager](https://git
 
 - Indigo 2022.1 or later (Python 3.10+)
 - [SigenEnergyManager](https://github.com/Highsteads/SigenEnergyManager) v4.6+ (provides the half-hourly energy database)
-- LibreOffice or Numbers (optional, for auto-opening reports)
+- A web browser to read the reports — any Mac already has one
 
 ## Installation
 
@@ -67,12 +67,12 @@ fallback added in v1.3.)*
 
 ## Output
 
-Reports are saved to:
+The plugin writes reports to:
 ```
 /Library/Application Support/Perceptive Automation/TariffAnalyser/
 ```
 
-Each report is a CSV named `tariff_report_YYYYMMDD_HHMMSS.csv`.
+Each one is an HTML file named `tariff_comparison_<from>_<to>_<timestamp>.html`, and the plugin hands it to macOS to open, so it lands in your default browser.
 
 ## Usage
 
@@ -81,7 +81,7 @@ Each report is a CSV named `tariff_report_YYYYMMDD_HHMMSS.csv`.
 | Menu item | What it does |
 |---|---|
 | Energy Summary | Savings summary (today / yesterday / this week / month / year) as an HTML page in your browser |
-| Tariff Comparison | Choose a lookback period; ranks every tariff by what your actual usage would have cost, opens the HTML report |
+| Tariff Comparison | Choose a lookback period, then it ranks every tariff by what your real usage would have cost and opens the HTML report |
 | Test Octopus API Connection | Checks the Agile products endpoint, the discovered import/export product codes for your region, and cached-price coverage |
 | Toggle Timestamps in Log | Turns the `[HH:MM:SS.mmm]` log prefix on or off |
 | Show Plugin Info | Displays plugin version, paths, region, and credential status |
@@ -123,13 +123,13 @@ Each report is a CSV named `tariff_report_YYYYMMDD_HHMMSS.csv`.
 
 ## Plugin Configuration
 
-Accessed via Indigo → Plugins → Tariff Analyser → Configure:
+Open it from Indigo → Plugins → Tariff Analyser → Configure:
 
 | Field | Default | Description |
 |---|---|---|
 | Timeseries DB path | Auto (SigenEnergyManager prefs) | Path to energy_timeseries.db |
-| Output folder | Auto (/Library/.../TariffAnalyser) | Where CSV reports are saved |
-| Open report after scheduled run | Off | Auto-open in LibreOffice/Numbers |
+| Output folder | Auto (/Library/.../TariffAnalyser) | Where HTML reports are saved |
+| Open report after scheduled run | Off | Opens the report once a schedule or action generates it |
 | Octopus region | F (North East England) | Used for Agile price lookups |
 | Export tariff | Octopus Outgoing 12p | Applied to all import tariff comparisons |
 | Default date range | Last 30 days | Default for scheduled action |
