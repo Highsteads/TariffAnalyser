@@ -157,6 +157,7 @@ survives a restart. It defaults to ON.
 
 ## Version history
 
+- **1.9.1–1.9.2** (21-07-2026) — housekeeping pair. Named log levels now map to the real logging levels — warnings and errors raised through the shared helper had been appearing as plain info lines, so amber and red entries people relied on for diagnosis never showed. Shared-utility refresh: calling the log timestamp filter twice no longer double-stamps every line, and the module imports cleanly outside Indigo.
 - **1.9** (18-07-2026) — deep-review improvements: a Test Octopus API Connection menu item, and the report now states when the illustrative "typical" fixed tariffs were last checked (Tracker and Agile always use live rates).
 - **1.8** (18-07-2026) — deep-review test buildout: 27 tests covering the comparison arithmetic and the collector's time-of-use, gas and timezone helpers.
 - **1.7** (18-07-2026) — deep-review financial fixes. Tariffs are now ranked fairly over a common set of half-hourly slots so a tariff with patchy price data can no longer appear cheapest just because part of your usage was never counted. A missing Tracker rate no longer records a false £0 day, the Go and Flux "saving vs Tracker" figures now include the standing-charge difference, and the Octopus fetch windows were widened so the first slots of a day are not lost in British Summer Time. First test suite added.
