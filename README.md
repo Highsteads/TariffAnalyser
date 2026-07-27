@@ -7,7 +7,7 @@ The [SigenEnergyManager](https://github.com/Highsteads/SigenEnergyManager) plugi
 ## Features
 
 - Half-hourly comparison using your actual grid import, export, solar generation, and battery usage
-- Supports Octopus Tracker (actual per-slot prices), Go, Go Faster, Agile, Cosy, Economy 7, Ofgem SVT price cap, E.ON, EDF, and Scottish Power
+- Supports Octopus Tracker (actual per-slot prices), Go, Go Faster, Agile, Cosy, Flux, Economy 7, Ofgem SVT price cap, E.ON, EDF, and Scottish Power
 - **Fair like-for-like ranking** — every tariff is priced over the same set of half-hourly slots (those where all selected tariffs have a price), with the standing charge pro-rated to that set. A tariff with too little price data is flagged as insufficient rather than ranked misleadingly cheap
 - Export revenue comparison: Octopus Outgoing 12p, Agile Outgoing, SEG minimum, SEG typical
 - Octopus Agile prices fetched automatically from the public API (no credentials needed)
@@ -107,6 +107,7 @@ Each one is an HTML file named `tariff_comparison_<from>_<to>_<timestamp>.html`,
 | go_faster | Octopus Go Faster | 6h cheap window 23:30–05:30 |
 | agile | Octopus Agile | Half-hourly variable, auto-fetched |
 | cosy | Octopus Cosy | Two 3h cheap windows + peak |
+| flux | Octopus Flux | 3h cheap window 02:00–05:00 + 3h peak 16:00–19:00 |
 | economy7 | Economy 7 | 7h night rate |
 | ofgem_cap | Ofgem SVT Price Cap | Single flat rate |
 | eon_fixed | E.ON Next Fixed | Typical fixed rate |
@@ -161,6 +162,8 @@ survives a restart. It defaults to ON.
 - **1.9** (18-07-2026) — deep-review improvements: a Test Octopus API Connection menu item, and the report now states when the illustrative "typical" fixed tariffs were last checked (Tracker and Agile always use live rates).
 - **1.8** (18-07-2026) — deep-review test buildout: 27 tests covering the comparison arithmetic and the collector's time-of-use, gas and timezone helpers.
 - **1.7** (18-07-2026) — deep-review financial fixes. Tariffs are now ranked fairly over a common set of half-hourly slots so a tariff with patchy price data can no longer appear cheapest just because part of your usage was never counted. A missing Tracker rate no longer records a false £0 day, the Go and Flux "saving vs Tracker" figures now include the standing-charge difference, and the Octopus fetch windows were widened so the first slots of a day are not lost in British Summer Time. First test suite added.
+- **1.6** (10-06-2026) — housekeeping. Lint clean-up and a continuous-integration check added as part of a fleet-wide audit. No change in behaviour.
+- **1.5** (05-06-2026) — estate bug-sweep. Opening the report automatically after a scheduled run called a function that no longer existed, so that option failed every time it was used. The coverage lookup now catches only database errors, letting genuine programming mistakes surface rather than hiding them.
 - **1.4** (23-05-2026) — millisecond timestamp `[HH:MM:SS.mmm]` prefix on every `self.logger` line via `plugin_utils.install_timestamp_filter()`; new "Toggle Timestamps in Log" menu item.
 - **1.3** (23-05-2026) — PluginConfig fallback for all 7 Octopus credential keys; secrets-policy compliance. `IndigoSecrets.py` still takes precedence when set.
 - **1.2** — current SigenEnergyManager integration; daily auto-update at 02:00.
