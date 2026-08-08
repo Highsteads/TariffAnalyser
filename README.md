@@ -158,6 +158,7 @@ survives a restart. It defaults to ON.
 
 ## Version history
 
+**v1.9.3** — **Added the missing support link.** Every Indigo plugin is meant to carry a web address inside its bundle — it is what the "About" item in the Plugins menu opens. This one had the entry but left it blank, so that menu item went nowhere. It now points at this repository. Nothing else changed.
 - **1.9.1–1.9.2** (21-07-2026) — housekeeping pair. Named log levels now map to the real logging levels — warnings and errors raised through the shared helper had been appearing as plain info lines, so amber and red entries people relied on for diagnosis never showed. Shared-utility refresh: calling the log timestamp filter twice no longer double-stamps every line, and the module imports cleanly outside Indigo.
 - **1.9** (18-07-2026) — deep-review improvements: a Test Octopus API Connection menu item, and the report now states when the illustrative "typical" fixed tariffs were last checked (Tracker and Agile always use live rates).
 - **1.8** (18-07-2026) — deep-review test buildout: 27 tests covering the comparison arithmetic and the collector's time-of-use, gas and timezone helpers.

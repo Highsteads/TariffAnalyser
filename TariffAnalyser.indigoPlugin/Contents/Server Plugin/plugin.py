@@ -6,7 +6,15 @@
 #              Outputs HTML reports that open in the default browser.
 # Author:      CliveS & Claude Opus 4.8
 # Date:        21-07-2026
-# Version:     1.9.2
+# Version:     1.9.3
+#
+# v1.9.3 (08-08-2026): REQUIRED Info.plist KEY. `CFBundleURLTypes` was PRESENT but
+# EMPTY, so the plugin shipped without the support URL that becomes its
+# "About" menu item — one of the SIX keys the official Developer's Guide lists as
+# required. An empty array satisfies "key exists" while giving users nowhere to go,
+# which is why an earlier sweep that only looked for a MISSING key passed it. Found
+# by an estate check auditing the VALUE rather than the key's presence.
+# No plugin logic changed.
 #
 # v1.9.2 (21-07-2026): shared plugin_utils.py refreshed to v1.3 — the
 # estate-wide propagation of the four Appliance Monitor deep-review fixes.
