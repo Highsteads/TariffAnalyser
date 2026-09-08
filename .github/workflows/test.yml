@@ -20,6 +20,16 @@ jobs:
           python-version: "3.13"   # matches Indigo 2025.2's embedded Python
       - name: Syntax check
         run: python -m compileall -q "TariffAnalyser.indigoPlugin/Contents/Server Plugin"
+      # The job is named "tests" and until 08-09-2026 it ran none — compileall and
+      # ruff only, while 27 tests sat in the bundle never running on a push. Found by
+      # an estate sweep that looks for test_*.py ANYWHERE; the previous sweep required
+      # a tests/ directory at the repo root, so a suite inside the bundle was invisible
+      # to it. pytest from the root, because unittest's discovery cannot collect plain
+      # pytest-style functions.
+      - name: Tests
+        run: |
+          pip install pytest
+          python -m pytest -q
       - name: Lint (ruff — errors only, see ruff.toml)
         run: |
           pip install ruff
