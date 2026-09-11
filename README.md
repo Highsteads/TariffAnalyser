@@ -1,5 +1,7 @@
 # TariffAnalyser — Indigo Plugin
 
+**Version:** 1.9.4
+
 Compares your real recorded energy flows against UK electricity tariffs to show what you would have paid on each tariff.
 
 The [SigenEnergyManager](https://github.com/Highsteads/SigenEnergyManager) plugin records your energy flows every 30 minutes. TariffAnalyser reads that record, works out what each tariff would have cost you, and writes an HTML report that opens in your browser.
@@ -157,6 +159,8 @@ The plugin stores the setting in `pluginPrefs` (`timestampEnabled`) and it
 survives a restart. It defaults to ON.
 
 ## Version history
+
+**v1.9.4** — **The GitHub record inside the bundle now uses the standard spelling.** The plugin bundle carries a small record of where its source lives on GitHub. Ours spelt the two field names its own way, while the plugins Indigo Domotics and the community publish spell them `GithubUser` and `GithubRepo`. It now matches them. Nothing else changed.
 
 **v1.9.3** — **Added the missing support link.** Every Indigo plugin is meant to carry a web address inside its bundle — it is what the "About" item in the Plugins menu opens. This one had the entry but left it blank, so that menu item went nowhere. It now points at this repository. Nothing else changed.
 - **1.9.1–1.9.2** (21-07-2026) — housekeeping pair. Named log levels now map to the real logging levels — warnings and errors raised through the shared helper had been appearing as plain info lines, so amber and red entries people relied on for diagnosis never showed. Shared-utility refresh: calling the log timestamp filter twice no longer double-stamps every line, and the module imports cleanly outside Indigo.

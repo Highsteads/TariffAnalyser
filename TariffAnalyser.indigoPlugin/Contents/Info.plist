@@ -19,15 +19,15 @@
 	<string>1.0.0</string>
 	<key>GithubInfo</key>
 	<dict>
-		<key>org</key>
-		<string>Highsteads</string>
-		<key>repo</key>
+		<key>GithubRepo</key>
 		<string>TariffAnalyser</string>
+		<key>GithubUser</key>
+		<string>Highsteads</string>
 	</dict>
 	<key>IwsApiVersion</key>
 	<string>1.0.0</string>
 	<key>PluginVersion</key>
-	<string>1.9.3</string>
+	<string>1.9.4</string>
 	<key>ServerApiVersion</key>
 	<string>3.0</string>
 </dict>

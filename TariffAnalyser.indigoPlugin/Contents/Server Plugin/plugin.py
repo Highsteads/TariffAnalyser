@@ -4,9 +4,9 @@
 # Description: TariffAnalyser - compares UK energy tariffs against recorded
 #              half-hourly energy data from SigenEnergyManager.
 #              Outputs HTML reports that open in the default browser.
-# Author:      CliveS & Claude Opus 4.8
-# Date:        21-07-2026
-# Version:     1.9.3
+# Author:      CliveS & Claude Fable 5.1
+# Date:        11-09-2026
+# Version:     1.9.4
 #
 # v1.9.3 (08-08-2026): REQUIRED Info.plist KEY. `CFBundleURLTypes` was PRESENT but
 # EMPTY, so the plugin shipped without the support URL that becomes its
