@@ -4,9 +4,20 @@
 # Description: TariffAnalyser - compares UK energy tariffs against recorded
 #              half-hourly energy data from SigenEnergyManager.
 #              Outputs HTML reports that open in the default browser.
-# Author:      CliveS & Claude Fable 5.1
-# Date:        11-09-2026
-# Version:     1.9.4
+# Author:      CliveS & Claude Opus 5.5
+# Date:        23-09-2026
+# Version:     1.9.5
+#
+# v1.9.5 (23-09-2026): NO SERVER CALL AT IMPORT. The default SigenEnergyManager
+# DB path was built at MODULE level from indigo.server.getInstallFolderPath().
+# During a bulk restart of six plugins on 11-09-2026 that call timed out and the
+# plugin died at import (ServerCommunicationError), before startup() could log
+# or retry. The install folder is now resolved by Plugin._install_folder_path():
+# cached once known, retried on each use until then, one WARNING per outage.
+# While unknown, the timeseries DB and Agile cache read as "not found" and the
+# plugin stays up. Paths are unchanged when the server answers.
+# tests/test_import_safety.py imports plugin.py with a stub whose every server
+# call raises.
 #
 # v1.9.3 (08-08-2026): REQUIRED Info.plist KEY. `CFBundleURLTypes` was PRESENT but
 # EMPTY, so the plugin shipped without the support URL that becomes its
@@ -158,13 +169,13 @@ AUTO_UPDATE_HOUR = 2
 _PA_SHARED = "/Library/Application Support/Perceptive Automation"
 OUTPUT_DIR = os.path.join(_PA_SHARED, "TariffAnalyser")
 
-# Default path to SigenEnergyManager timeseries DB
-_SIGEN_PREFS = os.path.join(
-    indigo.server.getInstallFolderPath(),
-    "Preferences", "Plugins",
-    "com.clives.indigoplugin.sigenergy-energy-manager"
-)
-DEFAULT_DB_PATH = os.path.join(_SIGEN_PREFS, "energy_timeseries.db")
+# Default SigenEnergyManager timeseries DB lives in that plugin's prefs folder,
+# under the versioned Indigo install folder. The folder is resolved at RUNTIME by
+# Plugin._install_folder_path() — never here. A server call at module level has
+# no second chance: when it timed out during a bulk restart (11-09-2026) the
+# plugin died at import, before startup() could log or retry anything.
+SIGEN_PLUGIN_ID = "com.clives.indigoplugin.sigenergy-energy-manager"
+SIGEN_DB_NAME   = "energy_timeseries.db"
 
 # Octopus region for North East England (Medomsley, County Durham)
 DEFAULT_REGION = "F"
@@ -209,6 +220,8 @@ class Plugin(indigo.PluginBase):
 
         self._last_report_path  = None   # path of most recently generated report
         self._last_auto_update  = None   # date of last automatic daily summary run
+        self._install_folder    = None   # resolved lazily; see _install_folder_path()
+        self._install_warned    = False  # one WARNING per outage, not one per use
         self.timestamp_enabled  = bool(plugin_prefs.get("timestampEnabled", True))
 
         if install_timestamp_filter:
@@ -221,9 +234,11 @@ class Plugin(indigo.PluginBase):
     def startup(self):
         log(f"{PLUGIN_NAME} v{self.pluginVersion} ready")
         os.makedirs(self._output_dir(), exist_ok=True)
-        octopus_prices.init_agile_db(self._agile_db_path())
+        agile_db = self._agile_db_path()
+        if agile_db:
+            octopus_prices.init_agile_db(agile_db)
         db_path = self._db_path()
-        if os.path.exists(db_path):
+        if db_path and os.path.exists(db_path):
             daily_collector.init_daily_summary_db(db_path)
             log(f"[DailySummary] Table ready: {db_path}")
 
@@ -250,13 +265,48 @@ class Plugin(indigo.PluginBase):
     # Plugin prefs helpers
     # ================================================================
 
+    def _install_folder_path(self):
+        """The versioned Indigo install folder, or None if the server has not
+        answered. Cached once known; retried on every use until then, so a
+        server that is slow at startup costs a WARNING, not the plugin."""
+        if self._install_folder:
+            return self._install_folder
+        try:
+            folder = indigo.server.getInstallFolderPath()
+        except Exception as exc:
+            if not self._install_warned:
+                self._install_warned = True
+                log(f"Could not get the Indigo install folder from the server ({exc}). "
+                    f"The SigenEnergyManager timeseries DB and the Agile price cache "
+                    f"are unavailable until it answers; will retry on next use.",
+                    level="WARNING")
+            return None
+        if not folder:
+            return None
+        self._install_folder = folder
+        if self._install_warned:
+            self._install_warned = False
+            log(f"Indigo install folder now resolved: {folder}")
+        return folder
+
+    def _default_db_path(self):
+        """SigenEnergyManager's timeseries DB, or "" while the install folder
+        is unknown (callers treat "" as not found)."""
+        folder = self._install_folder_path()
+        if not folder:
+            return ""
+        return os.path.join(folder, "Preferences", "Plugins", SIGEN_PLUGIN_ID, SIGEN_DB_NAME)
+
     def _db_path(self):
         configured = self.pluginPrefs.get("dbPath", "").strip()
-        return configured if configured else DEFAULT_DB_PATH
+        return configured if configured else self._default_db_path()
 
     def _agile_db_path(self):
-        prefs_dir = indigo.server.getInstallFolderPath()
-        data_dir  = os.path.join(prefs_dir, "Preferences", "Plugins", PLUGIN_ID)
+        """Agile price cache path, or "" while the install folder is unknown."""
+        folder = self._install_folder_path()
+        if not folder:
+            return ""
+        data_dir = os.path.join(folder, "Preferences", "Plugins", PLUGIN_ID)
         os.makedirs(data_dir, exist_ok=True)
         return os.path.join(data_dir, "agile_prices.db")
 
@@ -305,7 +355,7 @@ class Plugin(indigo.PluginBase):
             "gas_serial":      _OCTOPUS_GAS_SERIAL     or prefs.get("octopusGasSerial",    "").strip(),
             "region":          self._region(),
             "gas_unit_rate_p": self._gas_unit_rate(),
-            "timeseries_db":   DEFAULT_DB_PATH,
+            "timeseries_db":   self._default_db_path(),
         }
 
     def _have_octopus_creds(self):
@@ -424,9 +474,12 @@ class Plugin(indigo.PluginBase):
 
     def _ensure_agile_prices(self, date_from, date_to):
         """Silently fetch any missing Agile price slots for the date range."""
+        agile_db = self._agile_db_path()
+        if not agile_db:
+            return   # install folder unknown — already warned
         try:
             octopus_prices.fetch_agile_prices(
-                self._agile_db_path(), self._region(),
+                agile_db, self._region(),
                 date_from, date_to, log_fn=log,
             )
         except Exception as exc:
@@ -437,11 +490,16 @@ class Plugin(indigo.PluginBase):
         date_to   = date.today()
         date_from = date_to - timedelta(days=days - 1)
 
+        agile_db = self._agile_db_path()
+        if not agile_db:
+            log("[Prices] Agile price cache unavailable (Indigo install folder not "
+                "known yet) — try again shortly.", level="WARNING")
+            return
         log(f"[Prices] Fetching Agile prices {date_from} to {date_to} "
             f"(region {self._region()})")
         try:
             imp, exp = octopus_prices.fetch_agile_prices(
-                self._agile_db_path(),
+                agile_db,
                 self._region(),
                 date_from,
                 date_to,
@@ -481,8 +539,8 @@ class Plugin(indigo.PluginBase):
     def showPluginInfo(self, valuesDict=None, typeId=None):
         secrets_status = self._secrets_status_line()
         extras = [
-            ("Timeseries DB:",     self._db_path()),
-            ("Agile DB:",          self._agile_db_path()),
+            ("Timeseries DB:",     self._db_path() or "(install folder unknown)"),
+            ("Agile DB:",          self._agile_db_path() or "(install folder unknown)"),
             ("Output folder:",     self._output_dir()),
             ("Region:",            self._region()),
             ("Secrets:",           secrets_status),

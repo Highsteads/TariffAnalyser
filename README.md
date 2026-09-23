@@ -1,6 +1,6 @@
 # TariffAnalyser — Indigo Plugin
 
-**Version:** 1.9.4
+**Version:** 1.9.5
 
 Compares your real recorded energy flows against UK electricity tariffs to show what you would have paid on each tariff.
 
@@ -159,6 +159,8 @@ The plugin stores the setting in `pluginPrefs` (`timestampEnabled`) and it
 survives a restart. It defaults to ON.
 
 ## Version history
+
+**v1.9.5** — **The plugin no longer dies if the Indigo server is slow to answer when it starts.** It used to ask the server for its install folder the moment the code loaded, and when six plugins were restarted together the server did not answer in time, so Tariff Analyser failed to start at all. It now asks once it is running, retries until it gets an answer, and logs one warning in the meantime. Nothing changes when the server answers straight away.
 
 **v1.9.4** — **The GitHub record inside the bundle now uses the standard spelling.** The plugin bundle carries a small record of where its source lives on GitHub. Ours spelt the two field names its own way, while the plugins Indigo Domotics and the community publish spell them `GithubUser` and `GithubRepo`. It now matches them. Nothing else changed.
 
