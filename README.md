@@ -1,8 +1,8 @@
 # Tariff Analyser for Indigo
 
-**See what your own half-hourly electricity use would have cost on eleven UK tariffs, from inside Indigo.**
+**See what your own half-hourly electricity use would have cost on ten UK tariffs, from inside Indigo.**
 
-**Version:** 1.10 | **Author:** CliveS & Claude | **Needs:** Indigo 2022.1 or later and SigenEnergyManager 4.6 or later
+**Version:** 1.11 | **Author:** CliveS & Claude | **Needs:** Indigo 2022.1 or later and SigenEnergyManager 4.6 or later
 
 **[Read the full guide](https://highsteads.github.io/TariffAnalyser/)** — setting up, what the reports show, and what to do when something goes wrong.
 
@@ -10,9 +10,9 @@
 
 ## What it does
 
-This plugin lets [Indigo](https://www.indigodomo.com) price the energy your house really bought, sold and made, half an hour at a time, on each of eleven UK tariffs, and shows you the answer as a web page in your browser. It reads the record of your home's energy that my [SigenEnergyManager](https://github.com/Highsteads/SigenEnergyManager) plugin keeps for a Sigenergy solar and battery system.
+This plugin lets [Indigo](https://www.indigodomo.com) price the energy your house really bought, sold and made, half an hour at a time, on each of ten UK tariffs, and shows you the answer as a web page in your browser. It reads the record of your home's energy that my [SigenEnergyManager](https://github.com/Highsteads/SigenEnergyManager) plugin keeps for a Sigenergy solar and battery system.
 
-- **Ranks the tariffs** — the prices you actually paid, named after the tariff you were on, against Octopus Go, Go Faster, Agile, Cosy and Flux, Economy 7, the Ofgem price cap, and typical fixed deals from E.ON Next, EDF and Scottish Power — by what the last 7 to 365 days would have cost you on each, with a month-by-month breakdown.
+- **Ranks the tariffs** — the prices you actually paid, named after the tariff you were on, against Octopus Go, Agile, Cosy and Flux, Economy 7, the Ofgem price cap, and typical fixed deals from E.ON Next, EDF and Scottish Power — by what the last 7 to 365 days would have cost you on each, with a month-by-month breakdown.
 - **Compares them fairly.** Every tariff is priced over the same half-hours, with the standing charge for those half-hours only, so a tariff with gaps in its prices cannot come out cheapest just because some of your use was never counted.
 - **Prices your exports** at Octopus Outgoing 12p, Agile Outgoing, or the Smart Export Guarantee minimum or typical rate, whichever you choose.
 - **Shows what your solar has saved** today, yesterday, this week, this month and this year, with a projection for a whole year.
@@ -40,11 +40,11 @@ The [full guide](https://highsteads.github.io/TariffAnalyser/) goes through each
 
 ## What's new
 
+**v1.11** — The standing charges are the real ones. The row for the prices you paid uses the standing charge SigenEnergyManager recorded for each day, and Octopus Go, Agile, Cosy and Flux use the figure Octopus publishes for your region, where before they all shared one made-up 53.35p a day. Go Faster is gone from the comparison, because Octopus no longer sells it, and the nightly collection uses the same figures and your **Timeseries DB path** setting.
+
 **v1.10** — The region menu gives the right areas for K to P, a scheduled comparison fetches the Agile prices it needs first, and the reports name the tariff you were really on instead of always calling it Tracker. The Energy Summary shows your export tariff at its real price, the nightly collection no longer assumes my house's install date and Tracker tariff, and `IndigoSecrets.py` still counts when one of its Octopus lines is missing.
 
 **v1.9.5** — The plugin no longer fails to start when Indigo's server is slow to answer, such as when several plugins restart at once. It now keeps trying until the server answers and logs one warning in the meantime.
-
-**v1.9.4** — The note inside the plugin of where its code lives on GitHub uses the same spelling as other Indigo plugins. Nothing else changed.
 
 Every version is listed in the [version history](https://highsteads.github.io/TariffAnalyser/changelog.html).
 

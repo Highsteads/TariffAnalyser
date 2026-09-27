@@ -7,15 +7,32 @@
 # Date:        02-05-2026
 # Version:     1.0
 
+import json
+import os
 import sqlite3
 from collections import Counter
 from datetime import datetime, timedelta
 
-# The date the hardcoded "typical" fixed tariffs and standing charges below were
-# last checked. Tracker and Agile come from live data; the fixed reference rates
-# (Go, Cosy, Flux, Ofgem cap, E.ON/EDF/Scottish Power) are illustrative and drift
-# — surfaced in the report so a user knows how current they are.
+# The date the hardcoded "typical" unit rates below, and the standing charges of
+# the tariffs that are not Octopus's, were last checked. Tracker and Agile unit
+# prices come from live data; the fixed reference rates (Go, Cosy, Flux, Ofgem
+# cap, E.ON/EDF/Scottish Power) are illustrative and drift — surfaced in the
+# report so a user knows how current they are.
 REFERENCE_RATES_UPDATED = "2026-05-02"
+
+# Standing charges (v1.11). The recorded-prices row uses the figure
+# SigenEnergyManager recorded for each day (daily_history.json, beside the
+# timeseries DB). The Octopus rows use Octopus's published figure for the
+# user's region, fetched by octopus_prices.standing_charges_by_day() using each
+# tariff's "octopus_name". The standing_p_day values below are only the
+# fallback: for the Octopus rows they are Octopus's region F (North East
+# England) figures on OCTOPUS_STANDING_UPDATED.
+OCTOPUS_STANDING_UPDATED = "2026-09-27"
+DAILY_HISTORY_NAME       = "daily_history.json"
+# Key under which the plugin passes Octopus's Tracker standing charge (fetched
+# only when the Tracker product setting is filled in), used as the recorded
+# row's fallback when that row is Tracker.
+TRACKER_LIVE_KEY         = "octopus_tracker"
 
 # ---------------------------------------------------------------------------
 # Tariff definitions
@@ -36,6 +53,8 @@ IMPORT_TARIFFS = {
     "tracker": {
         "name":              "Your tariff (actual)",
         "type":              "variable_db",
+        # Last resort only: each day's recorded figure comes first, then
+        # Octopus's figure for the recorded tariff.
         "standing_p_day":    61.64,
     },
     "go": {
@@ -45,21 +64,14 @@ IMPORT_TARIFFS = {
         "cheap_end":         "05:30",
         "cheap_p":           7.5,
         "peak_p":            24.0,
-        "standing_p_day":    53.35,
-    },
-    "go_faster": {
-        "name":              "Octopus Go Faster",
-        "type":              "tou",
-        "cheap_start":       "23:30",
-        "cheap_end":         "05:30",
-        "cheap_p":           7.5,
-        "peak_p":            24.0,
-        "standing_p_day":    53.35,
+        "standing_p_day":    63.21819,
+        "octopus_name":      "Octopus Go",
     },
     "agile": {
         "name":              "Octopus Agile",
         "type":              "agile",
-        "standing_p_day":    53.35,
+        "standing_p_day":    70.04823,
+        "octopus_name":      "Agile Octopus",
         "cap_p":             100.0,   # Agile price cap per Octopus terms
     },
     "cosy": {
@@ -73,7 +85,8 @@ IMPORT_TARIFFS = {
         "peak_end":          "19:00",
         "peak_p":            38.0,
         "shoulder_p":        26.0,
-        "standing_p_day":    53.35,
+        "standing_p_day":    61.51824,
+        "octopus_name":      "Cosy Octopus",
     },
     "flux": {
         "name":              "Octopus Flux",
@@ -85,7 +98,8 @@ IMPORT_TARIFFS = {
         "peak_end":          "19:00",
         "peak_p":            33.00,
         "shoulder_p":        21.00,
-        "standing_p_day":    53.35,
+        "standing_p_day":    61.51824,
+        "octopus_name":      "Octopus Flux Import",
     },
     "economy7": {
         "name":              "Economy 7 (typical)",
@@ -209,6 +223,8 @@ def run_comparison(
     import_tariff_keys=None,
     export_tariff_key="outgoing_12p",
     current_tariff_name="",
+    recorded_standing=None,
+    live_standing=None,
 ):
     """Run tariff comparison over the given date range.
 
@@ -224,6 +240,12 @@ def run_comparison(
         current_tariff_name: the tariff SigenEnergyManager's tariff monitor says
                              is active now (e.g. "Octopus Flux"), used to name
                              the recorded-prices row; "" when unknown
+        recorded_standing:   {"YYYY-MM-DD": pence_a_day} the house actually paid
+                             for standing; None = read SigenEnergyManager's
+                             daily_history.json beside timeseries_db_path
+        live_standing:       {tariff_key: {"YYYY-MM-DD": pence_a_day}} from
+                             octopus_prices.standing_charges_by_day(); a
+                             tariff or day not in it uses standing_p_day
 
     Returns a dict:
         {
@@ -253,6 +275,9 @@ def run_comparison(
     """
     if import_tariff_keys is None:
         import_tariff_keys = list(IMPORT_TARIFFS.keys())
+    # A key no longer in the table (Go Faster, dropped in v1.11 because Octopus
+    # sells no such tariff) is ignored rather than raising KeyError.
+    import_tariff_keys = [k for k in import_tariff_keys if k in IMPORT_TARIFFS]
 
     export_tariff = EXPORT_TARIFFS[export_tariff_key]
 
@@ -265,6 +290,10 @@ def run_comparison(
 
     if not rows:
         return {"slots": 0, "days": 0, "results": [], "monthly": {}, "raw_totals": {}}
+
+    if recorded_standing is None:
+        recorded_standing = load_recorded_standing(recorded_standing_path(timeseries_db_path))
+    live_standing = live_standing or {}
 
     # Compute calendar days in range
     days = (date_to - date_from).days + 1
@@ -324,6 +353,7 @@ def run_comparison(
     acc   = {k: {"import_p": 0.0, "export_p": 0.0} for k in ranked_keys}
     monthly        = {}   # {month_str: {tariff_key: net_energy_cost_p}} (common slots)
     monthly_common = {}   # {month_str: common_slot_count}
+    common_by_day  = Counter()   # {date_str: common_slot_count}, for standing
     common_slots   = 0
     for (slot_start, imp_kwh, exp_kwh, rates) in slot_rates:
         month_str = slot_start[:7]
@@ -333,6 +363,7 @@ def run_comparison(
             continue
         common_slots += 1
         monthly_common[month_str] += 1
+        common_by_day[slot_start[:10]] += 1
         exp_rate = _export_rate_for_slot(slot_start, export_tariff, agile_export)
         exp_rev  = (exp_kwh or 0.0) * (exp_rate or 0.0)
         for key in ranked_keys:
@@ -342,15 +373,41 @@ def run_comparison(
             monthly[month_str][key] += cost - exp_rev
 
     coverage_pct  = round(common_slots / total_slots * 100.0, 1) if total_slots else 0.0
+
     # Standing is charged per PRICED half-hour (1 slot = 1/48 of a day) so unit
-    # cost and standing sit on the same slot basis as the common comparison.
-    standing_days = common_slots / 48.0
+    # cost and standing sit on the same slot basis as the common comparison,
+    # each half-hour at the figure for its own day.
+    recorded_name = clean_tariff_name(current_tariff_name)
+    name_fits     = bool(recorded_name) and recorded_label == f"{recorded_name} (actual)"
+    recorded_live = live_standing.get(live_standing_key(recorded_name), {}) if name_fits else {}
+    standing_by_key  = {}
+    standing_sources = {}
+    recorded_fallback_days = []
+    for key in ranked_keys:
+        table_p = IMPORT_TARIFFS[key].get("standing_p_day", 0.0)
+        live    = recorded_live if key == "tracker" else live_standing.get(key, {})
+        total, used = 0.0, set()
+        for day in sorted(common_by_day):
+            p = recorded_standing.get(day) if key == "tracker" else None
+            if p is not None:
+                used.add("recorded")
+            else:
+                if key == "tracker":
+                    recorded_fallback_days.append(day)
+                p = live.get(day)
+                if p is not None:
+                    used.add("octopus")
+                else:
+                    p = table_p
+                    used.add("table")
+            total += p * common_by_day[day] / 48.0
+        standing_by_key[key]  = total
+        standing_sources[key] = sorted(used)
 
     results = []
     for key in ranked_keys:
-        tariff = IMPORT_TARIFFS[key]
         a = acc[key]
-        standing = tariff.get("standing_p_day", 0.0) * standing_days
+        standing = standing_by_key[key]
         net      = a["import_p"] - a["export_p"]
         total    = net + standing
         own_cov  = (raw_valid[key] / total_slots * 100.0) if total_slots else 0.0
@@ -402,6 +459,12 @@ def run_comparison(
         "raw_totals":     {k: round(v, 3) for k, v in totals.items()},
         "recorded_tariff_label": recorded_label,
         "recorded_tariff_note":  recorded_note,
+        # Where each ranked tariff's standing charge came from: any of
+        # "recorded" (SigenEnergyManager's daily figure), "octopus" (Octopus's
+        # published figure) and "table" (standing_p_day).
+        "standing_sources":      standing_sources,
+        "recorded_standing_fallback_days": recorded_fallback_days,
+        "recorded_standing_live_name": recorded_name if recorded_live else "",
     }
 
 
@@ -625,6 +688,83 @@ def recorded_tariff_for_period(timeseries_db_path, date_from, date_to, current_n
     """recorded_tariff_label() for a date range read from the timeseries DB."""
     rows = _load_timeseries(timeseries_db_path, date_from, date_to)
     return recorded_tariff_label(_day_price_counts(rows), current_name)
+
+
+# ---------------------------------------------------------------------------
+# Standing charges the house actually paid (v1.11)
+# ---------------------------------------------------------------------------
+
+def recorded_standing_path(timeseries_db_path):
+    """SigenEnergyManager's daily_history.json, which sits in the same prefs
+    folder as its energy_timeseries.db. "" when there is no DB path."""
+    if not timeseries_db_path:
+        return ""
+    return os.path.join(os.path.dirname(timeseries_db_path), DAILY_HISTORY_NAME)
+
+
+def load_recorded_standing(path, field="elec_standing_p_day"):
+    """{"YYYY-MM-DD": pence_a_day} from SigenEnergyManager's daily_history.json
+    (a JSON list of day records). Days without the field — older records
+    predate it — are left out, so the caller falls back for them. A missing or
+    unreadable file gives {}."""
+    if not path:
+        return {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, list):
+        return {}
+    out = {}
+    for rec in data:
+        if not isinstance(rec, dict):
+            continue
+        ds = rec.get("date")
+        if not isinstance(ds, str) or len(ds) != 10:
+            continue
+        try:
+            value = float(rec.get(field))
+        except (TypeError, ValueError):
+            continue
+        if value != value or value <= 0:      # NaN or nonsense
+            continue
+        out[ds] = value
+    return out
+
+
+def live_standing_key(name):
+    """The live_standing key holding Octopus's standing charge for a tariff
+    named like SigenEnergyManager's Tariff Monitor names it, or None."""
+    words = clean_tariff_name(name).lower().replace("-", " ").split()
+    if not words or "intelligent" in words:
+        return None
+    if "tracker" in words:
+        return TRACKER_LIVE_KEY
+    for word, key in (("agile", "agile"), ("flux", "flux"), ("cosy", "cosy")):
+        if word in words:
+            return key
+    if "go" in words and "faster" not in words:
+        return "go"
+    return None
+
+
+def format_day_ranges(days):
+    """"3 Jun to 5 Jun and 9 Jun" from a list of YYYY-MM-DD strings."""
+    parsed = sorted({datetime.strptime(d, "%Y-%m-%d").date() for d in days})
+    runs = []
+    for d in parsed:
+        if runs and (d - runs[-1][1]).days == 1:
+            runs[-1][1] = d
+        else:
+            runs.append([d, d])
+
+    def _one(d):
+        return f"{d.day} {d.strftime('%b')}"
+    parts = [_one(a) if a == b else f"{_one(a)} to {_one(b)}" for a, b in runs]
+    if len(parts) <= 1:
+        return "".join(parts)
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
 
 
 def get_coverage(timeseries_db_path):

@@ -13,6 +13,8 @@ SigenEnergyManager writes a line to its energy database every half hour: what th
 
 For each tariff, it takes every half-hour in the period, works out that tariff's price for that half-hour, and multiplies it by what you bought. It does the same for what you sold, at your chosen export price, then adds the standing charge.
 
+SigenEnergyManager also keeps a line for each day, with the standing charge you paid that day. The row for your own tariff uses that. For the Octopus tariffs the plugin fetches the standing charge Octopus publishes for your region, with the dates each figure applies, so each day is charged at the figure in force that day. The [tariffs page](tariffs.md) says what happens when a figure is missing.
+
 ## Keeping the comparison fair
 
 A tariff can only be priced for a half-hour if the plugin has a price for it. Agile prices might not have been fetched for part of the period, and SigenEnergyManager might not have recorded a price for a half-hour.
@@ -24,7 +26,7 @@ If each tariff were simply added up over the half-hours it has prices for, a tar
 
 ## Agile prices
 
-Octopus publishes Agile prices on its public price list, which needs no account or key. The plugin finds the current Agile tariff for your region, fetches the prices for the half-hours it does not already have, and keeps them in a small database in its own folder inside Indigo's Preferences folder. A published Agile price never changes, so a price once saved is kept, and later reports only fetch what is new.
+Octopus publishes Agile prices on its public price list, which needs no account or key. The plugin finds the current Agile tariff for your region, fetches the prices for the half-hours it does not already have, and keeps them in a small database in its own folder inside Indigo's Preferences folder. The standing charges for Go, Agile, Cosy and Flux come from the same list and go in the same database, fetched again at most once a day. A published Agile price never changes, so a price once saved is kept, and later reports only fetch what is new.
 
 Every comparison, from the Plugins menu or the **Generate Tariff Comparison Report** action, first checks the saved Agile prices cover its period and fetches any that are missing. If Octopus cannot be reached, the Event Log says so and the comparison uses the prices already saved. Nothing fetches Agile prices at night, so a comparison over a long period may take a moment the first time.
 
@@ -34,9 +36,9 @@ If the plugin has an Octopus API key, then at 2am each night it collects the las
 
 - the day's energy from SigenEnergyManager's half-hourly record
 - the readings from your Octopus meters, where you have given the plugin their details
-- the day's cost at the prices you paid, and what it would have been on Go and Flux
+- the day's cost at the prices you paid, and what it would have been on Go and Flux, each with its own standing charge for that day
 - the saving your solar made that day, counted from the **Solar install date** if you have set one
-- your gas use and its cost, if you have given it your gas meter's details
+- your gas use and its cost, if you have given it your gas meter's details, with the gas standing charge SigenEnergyManager recorded
 
 The two reports do not use this daily summary. It is there for anything else that reads the energy database. If you do not give the plugin an API key, it logs a warning at 2am and skips the collection, and the reports work as before.
 

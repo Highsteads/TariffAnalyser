@@ -6,7 +6,29 @@
 #              Outputs HTML reports that open in the default browser.
 # Author:      CliveS & Claude Opus 5.5
 # Date:        27-09-2026
-# Version:     1.10
+# Version:     1.11
+#
+# v1.11 (27-09-2026): STANDING CHARGES FROM THE REAL FIGURES.
+# * The recorded-prices row paid a fixed Tracker 61.64p a day. It now uses the
+#   figure SigenEnergyManager recorded for each day (elec_standing_p_day in its
+#   daily_history.json, beside the timeseries DB), pro-rated per priced
+#   half-hour. A day with none falls back to Octopus's figure for the recorded
+#   tariff, then the table value; the report names those days.
+# * Every Octopus comparison tariff carried a fixed 53.35p. Go, Agile, Cosy and
+#   Flux now use Octopus's published standing charge for the region setting,
+#   per day (octopus_prices.standing_charges_by_day, saved beside the Agile
+#   prices, fetched at most daily); a failed fetch is one WARNING naming the
+#   tariff and the table value (now region F on 27-09-2026) stands.
+# * Go Faster dropped from the comparison: Octopus sells no such tariff, and
+#   its made-up 53.35p standing charge ranked it cheapest. run_comparison
+#   ignores a tariff key it no longer knows.
+# * The nightly collection reads the SigenEnergyManager database from the
+#   Timeseries DB path setting, as the reports do (blank = default path). It
+#   always used the default path before.
+# * The nightly collection uses the same figures: the day's recorded
+#   electricity and gas standing charges, and Octopus's Go and Flux figures.
+# * Report note says where each standing charge came from instead of "use
+#   published rates and may differ".
 #
 # v1.10 (27-09-2026): the faults found while writing the plain-English guide.
 # * Region menu: K-P named after the wrong areas (K is South Wales, L South West
@@ -455,7 +477,7 @@ class Plugin(indigo.PluginBase):
             "gas_serial":      _OCTOPUS_GAS_SERIAL     or prefs.get("octopusGasSerial",    "").strip(),
             "region":          self._region(),
             "gas_unit_rate_p": self._gas_unit_rate(),
-            "timeseries_db":   self._default_db_path(),
+            "timeseries_db":   self._db_path(),
             "tracker_product":    self._tracker_product(),
             "solar_install_date": self._solar_install_date(),
         }
@@ -491,10 +513,10 @@ class Plugin(indigo.PluginBase):
         log(f"{label} Updating daily_summary: {date_from} to {date_to} ({days} days)")
         try:
             daily_collector.init_daily_summary_db(db_path)
+            config = self._build_octopus_config()
+            config["live_standing"] = self._live_standing(date_from, date_to)
             daily_collector.update_daily_summary(
-                db_path, date_from, date_to,
-                self._build_octopus_config(),
-                log_fn=log,
+                db_path, date_from, date_to, config, log_fn=log,
             )
             log(f"{label} Daily summary update complete.")
             return True
@@ -548,6 +570,7 @@ class Plugin(indigo.PluginBase):
             date_to            = date_to,
             export_tariff_key  = self._export_tariff_key(),
             current_tariff_name = self._current_tariff_name(),
+            live_standing      = self._live_standing(date_from, date_to),
         )
         if comparison.get("slots", 0) == 0:
             errors["lookbackDays"] = (
@@ -601,6 +624,31 @@ class Plugin(indigo.PluginBase):
         except Exception as exc:
             log(f"[Prices] Could not fetch Agile prices ({exc}). The report uses "
                 f"the prices already stored.", level="WARNING")
+
+    def _live_standing(self, date_from, date_to):
+        """Octopus's published standing charge for each Octopus tariff in the
+        comparison, per day, for the region setting (and for Octopus Tracker
+        when its product code is set). Saved beside the Agile prices and
+        fetched again at most once a day. {} when none is available; any
+        tariff missing from the answer uses the plugin's own figure."""
+        agile_db = self._agile_db_path()
+        if not agile_db:
+            return {}   # install folder unknown — already warned
+        names = {key: t["octopus_name"] for key, t in tariff_engine.IMPORT_TARIFFS.items()
+                 if t.get("octopus_name")}
+        products = {}
+        tracker = self._tracker_product()
+        if tracker:
+            products[tariff_engine.TRACKER_LIVE_KEY] = tracker
+            names[tariff_engine.TRACKER_LIVE_KEY] = "Octopus Tracker"
+        try:
+            return octopus_prices.standing_charges_by_day(
+                agile_db, self._region(), date_from, date_to,
+                names=names, products=products, log_fn=log)
+        except Exception as exc:
+            log(f"[Standing] Could not read Octopus's standing charges ({exc}). "
+                f"The plugin's own figures are used.", level="WARNING")
+            return {}
 
     def updatePriceData(self, valuesDict=None, typeId=None):
         days = self._default_days()
@@ -746,6 +794,7 @@ class Plugin(indigo.PluginBase):
             date_to            = date_to,
             export_tariff_key  = self._export_tariff_key(),
             current_tariff_name = self._current_tariff_name(),
+            live_standing      = self._live_standing(date_from, date_to),
         )
 
         if comparison.get("slots", 0) == 0:

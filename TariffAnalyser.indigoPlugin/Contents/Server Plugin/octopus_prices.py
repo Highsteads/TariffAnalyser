@@ -11,6 +11,7 @@
 import json
 import os
 import sqlite3
+import time
 import urllib.request
 import urllib.error
 from datetime import datetime, timedelta
@@ -37,6 +38,16 @@ def init_agile_db(db_path):
             region      TEXT NOT NULL,
             price_p     REAL NOT NULL,
             PRIMARY KEY (slot_start, region)
+        );
+        CREATE TABLE IF NOT EXISTS standing_charges (
+            tariff_key  TEXT NOT NULL,
+            region      TEXT NOT NULL,
+            product     TEXT NOT NULL,
+            valid_from  TEXT NOT NULL,   -- local time, YYYY-MM-DDTHH:MM:SS
+            valid_to    TEXT,            -- local time; NULL = still current
+            p_day       REAL NOT NULL,   -- pence a day, VAT included
+            fetched_at  REAL NOT NULL,   -- epoch seconds of the fetch
+            PRIMARY KEY (tariff_key, region, valid_from)
         );
     """)
     # NB: a fetch_log table was declared here historically but never read or
@@ -206,6 +217,207 @@ def _discover_product(region, direction, log_fn):
     except Exception as exc:
         log_fn(f"Product discovery failed: {exc}", level="WARNING")
     return None, None
+
+
+# ---------------------------------------------------------------------------
+# Standing charges (v1.11)
+# ---------------------------------------------------------------------------
+# Octopus publishes each tariff's standing charge for every region, with the
+# dates each figure applies, on the same public price list as the Agile prices.
+# The comparison tariffs are found by display name on the products list, the
+# way _discover_product finds Agile, and the figures are kept in this database,
+# fetched again at most once a day. Until v1.11 every Octopus tariff carried a
+# fixed 53.35p a day, which was nobody's region.
+
+STANDING_REFRESH_SECONDS = 24 * 3600
+
+
+def standing_charges_by_day(db_path, region, date_from, date_to, names=None,
+                            products=None, log_fn=None, now=None):
+    """Octopus's standing charge for each day of date_from..date_to.
+
+    names:    {key: display name of the variable Octopus import product}, e.g.
+              {"go": "Octopus Go"}; the product code is looked up by that exact
+              name (ignoring case), so "Octopus Go" never picks up "Intelligent
+              Octopus Go" or a fixed deal.
+    products: {key: product code} for a tariff whose code is already known
+              (the Tracker product setting); no lookup.
+    now:      epoch seconds, for tests.
+
+    Returns {key: {"YYYY-MM-DD": pence_a_day}}. A key whose figures could not
+    be fetched and were never saved is left out, and the caller uses its own
+    figure. Each failure is one WARNING naming the tariff.
+    """
+    def _log(msg, level="INFO"):
+        if log_fn:
+            log_fn(f"[Standing] {msg}", level=level)
+
+    names    = dict(names or {})
+    products = dict(products or {})
+    keys     = list(dict.fromkeys(list(names) + list(products)))
+    if not keys:
+        return {}
+    now = time.time() if now is None else now
+    init_agile_db(db_path)
+
+    discovered = None       # {display name lower: code}, fetched once if needed
+    discover_error = None
+    for key in keys:
+        label   = names.get(key) or products.get(key) or key
+        fetched = _standing_fetched_at(db_path, key, region)
+        if fetched is not None and now - fetched < STANDING_REFRESH_SECONDS:
+            continue
+        try:
+            product = products.get(key)
+            if not product:
+                if discovered is None and discover_error is None:
+                    try:
+                        discovered = _discover_import_products()
+                    except Exception as exc:
+                        discover_error = exc
+                if discover_error is not None:
+                    raise discover_error
+                product = discovered.get(label.lower())
+                if not product:
+                    raise LookupError(f"Octopus has no current tariff called '{label}'")
+            periods = parse_standing_charges(_api_get_all(
+                f"{_API_BASE}/products/{product}/electricity-tariffs/"
+                f"E-1R-{product}-{region}/standing-charges/?page_size={_PAGE_SIZE}"))
+            if not periods:
+                raise LookupError("Octopus returned no standing charges")
+            _store_standing(db_path, key, region, product, periods, now)
+            _log(f"{label} standing charge for region {region}: "
+                 f"{periods[0][2]:.2f}p a day now ({product})")
+        except Exception as exc:
+            saved = ("the figures saved from the last fetch" if fetched is not None
+                     else "the plugin's own figure")
+            _log(f"Could not fetch the {label} standing charge for region {region} "
+                 f"from Octopus ({exc}). Using {saved}.", level="WARNING")
+
+    result = {}
+    for key in keys:
+        periods = _load_standing(db_path, key, region)
+        if not periods:
+            continue
+        days = {}
+        cur = date_from
+        while cur <= date_to:
+            ds = cur.strftime("%Y-%m-%d")
+            p = standing_for_day(periods, ds)
+            if p is not None:
+                days[ds] = p
+            cur += timedelta(days=1)
+        if days:
+            result[key] = days
+    return result
+
+
+def parse_standing_charges(results):
+    """[(valid_from_local, valid_to_local or None, pence_a_day), ...] from the
+    Octopus standing-charges results, newest first. Where Octopus gives
+    separate direct-debit and other figures, the direct-debit one is kept."""
+    items = [r for r in (results or []) if isinstance(r, dict)]
+    methods = {r.get("payment_method") for r in items}
+    if "DIRECT_DEBIT" in methods:
+        items = [r for r in items if r.get("payment_method") in (None, "", "DIRECT_DEBIT")]
+    periods = []
+    for item in items:
+        raw_from = item.get("valid_from")
+        try:
+            value = float(item.get("value_inc_vat"))
+        except (TypeError, ValueError):
+            continue
+        if not raw_from or value != value or value < 0:
+            continue
+        raw_to = item.get("valid_to")
+        periods.append((_utc_to_local(raw_from),
+                        _utc_to_local(raw_to) if raw_to else None,
+                        value))
+    periods.sort(key=lambda p: p[0], reverse=True)
+    return periods
+
+
+def standing_for_day(periods, day_str):
+    """The standing charge in force at midday on day_str (local), or None."""
+    midday = f"{day_str}T12:00:00"
+    for valid_from, valid_to, value in periods:
+        if valid_from <= midday and (valid_to is None or midday < valid_to):
+            return value
+    return None
+
+
+def _discover_import_products():
+    """{display name lower: product code} for Octopus's variable import
+    products, the most recent where two share a name. Raises on failure."""
+    data = _api_get(f"{_API_BASE}/products/?is_variable=true&brand=OCTOPUS_ENERGY"
+                    f"&page_size=100")
+    best = {}
+    for product in data.get("results", []):
+        name = str(product.get("display_name", "")).strip().lower()
+        code = product.get("code")
+        if not name or not code or product.get("direction", "IMPORT") != "IMPORT":
+            continue
+        when = product.get("available_from", "") or ""
+        if name not in best or when > best[name][0]:
+            best[name] = (when, code)
+    return {name: code for name, (_when, code) in best.items()}
+
+
+def _api_get_all(url):
+    """Every result of a paged Octopus list."""
+    results = []
+    while url and len(results) < 10000:
+        data = _api_get(url)
+        results.extend(data.get("results", []))
+        url = data.get("next")
+    return results
+
+
+def _standing_fetched_at(db_path, key, region):
+    con = None
+    try:
+        con = sqlite3.connect(db_path)
+        row = con.execute(
+            "SELECT MAX(fetched_at) FROM standing_charges WHERE tariff_key=? AND region=?",
+            (key, region)).fetchone()
+        return row[0] if row and row[0] is not None else None
+    except sqlite3.Error:
+        return None
+    finally:
+        if con is not None:
+            con.close()
+
+
+def _store_standing(db_path, key, region, product, periods, now):
+    """Replace the saved figures for this tariff and region with a fresh set."""
+    con = sqlite3.connect(db_path)
+    try:
+        con.execute("DELETE FROM standing_charges WHERE tariff_key=? AND region=?",
+                    (key, region))
+        con.executemany(
+            "INSERT OR REPLACE INTO standing_charges "
+            "(tariff_key, region, product, valid_from, valid_to, p_day, fetched_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            [(key, region, product, vf, vt, p, now) for (vf, vt, p) in periods])
+        con.commit()
+    finally:
+        con.close()
+
+
+def _load_standing(db_path, key, region):
+    con = None
+    try:
+        con = sqlite3.connect(db_path)
+        rows = con.execute(
+            "SELECT valid_from, valid_to, p_day FROM standing_charges "
+            "WHERE tariff_key=? AND region=? ORDER BY valid_from DESC",
+            (key, region)).fetchall()
+        return [(r[0], r[1], r[2]) for r in rows]
+    except sqlite3.Error:
+        return []
+    finally:
+        if con is not None:
+            con.close()
 
 
 def _existing_slots(db_path, region, direction):

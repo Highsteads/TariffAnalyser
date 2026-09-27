@@ -7,6 +7,17 @@ nav_order: 10
 
 The newest version is at the top.
 
+## 1.11 — 27 September 2026
+
+The standing charges in the comparison are now the real ones.
+
+- The row for the prices you actually paid used the Tracker standing charge of 61.64p a day, whatever tariff you were on. It now uses the standing charge SigenEnergyManager recorded for each day, which is what you paid. For a day it has no figure for, which happens with older records, it uses Octopus's figure for the tariff you were on, and the report says which days those were.
+- Octopus Go, Agile, Cosy and Flux all had the same standing charge of 53.35p a day, which was not right for any of them. Each now uses the standing charge Octopus publishes for your region. The plugin fetches them no more than once a day, and if Octopus cannot be reached it says so in the Event Log and uses its own figures, which are now Octopus's figures for North East England on 27 September 2026.
+- Octopus Go Faster is no longer in the comparison. Octopus does not sell it, so it had no real standing charge, and the made-up one put it at the top of the ranking.
+- The nightly collection uses the same figures, for your electricity and gas and for its Go and Flux comparison.
+- The nightly collection reads SigenEnergyManager's energy database from the **Timeseries DB path** setting, as the reports do. Before, it always looked in the usual place, whatever the setting said.
+- The notes at the foot of the comparison say where each standing charge came from, instead of saying they may differ from your contract.
+
 ## 1.10 — 27 September 2026
 
 Put right the things that came to light while I was writing this guide.

@@ -32,7 +32,7 @@ Each tariff has one row, cheapest at the top, marked ★, and dearest at the bot
 | **Total cost** | What the period would have cost on that tariff: what you bought, less what you sold, plus the standing charge. |
 | **Import** | The cost of the electricity you bought. |
 | **Export** | What the electricity you sold would have earned, at the export tariff chosen in the settings. It is the same for every tariff. |
-| **Standing** | The daily standing charge for the period. |
+| **Standing** | The standing charge for the period, day by day. |
 | **vs actual** | How much cheaper or dearer the tariff is than the row for the prices you actually paid, which is marked **current** and named after the tariff you were on, such as **Octopus Flux (actual)**. |
 | **Coverage** | How much of the period that tariff has a price for. |
 
@@ -48,7 +48,7 @@ A second table gives the cost of energy on each tariff month by month, with the 
 
 ### The notes
 
-The last section sets out the terms of the comparison: every tariff is given the same pattern of use, the prices other than yours and Agile are typical published prices with the date they were last checked, standing charges may differ from your contract, and all costs include VAT at 5%.
+The last section sets out the terms of the comparison: every tariff is given the same pattern of use, the prices other than yours and Agile are typical published prices with the date they were last checked, where each tariff's standing charge came from, including any days SigenEnergyManager had no figure for, and all costs include VAT at 5%.
 
 Because every tariff is given the same pattern of use, a tariff with a cheap night rate may do better in real life than the report shows, since you would likely charge the battery in the cheap hours.
 

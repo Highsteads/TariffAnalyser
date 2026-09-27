@@ -82,7 +82,7 @@ class TestSlotInWindow(unittest.TestCase):
         self.assertFalse(te._slot_in_window("2026-07-01T00:00:00", "00:30", "05:30"))  # before start
 
     def test_overnight_wrap(self):
-        # go_faster cheap window 23:30-05:30 wraps midnight
+        # an overnight window 23:30-05:30 wraps midnight
         self.assertTrue(te._slot_in_window("2026-07-01T23:30:00", "23:30", "05:30"))
         self.assertTrue(te._slot_in_window("2026-07-01T00:00:00", "23:30", "05:30"))
         self.assertTrue(te._slot_in_window("2026-07-01T05:00:00", "23:30", "05:30"))
@@ -168,9 +168,10 @@ class TestRunComparisonFairness(unittest.TestCase):
         self.assertEqual(r["common_slots"], 24)
         self.assertEqual(r["coverage_pct"], 50.0)
         by = {x["tariff_key"]: x for x in r["results"]}
-        # BOTH priced over 24 kWh: agile 24x5=120 + 53.35*(24/48)=26.675 -> 146.675
+        # BOTH priced over 24 kWh: agile 24x5=120 + 70.04823*(24/48)=35.02 -> 155.02
+        # (Agile's table standing charge, used with no live Octopus figure)
         self.assertAlmostEqual(by["agile"]["import_cost_p"], 120.0, places=1)
-        self.assertAlmostEqual(by["agile"]["total_cost_p"], 146.68, places=1)
+        self.assertAlmostEqual(by["agile"]["total_cost_p"], 155.02, places=1)
         # ofgem over the SAME 24 slots: 24x24.5=588 + 61.64*(24/48)=30.82 -> 618.82
         self.assertAlmostEqual(by["ofgem_cap"]["import_cost_p"], 588.0, places=1)
         self.assertAlmostEqual(by["ofgem_cap"]["total_cost_p"], 618.82, places=1)
@@ -363,6 +364,126 @@ class TestRecordedTariffLabel(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+
+
+# ---------------------------------------------------------------------------
+# v1.11 — standing charges from the real figures
+# ---------------------------------------------------------------------------
+
+def _write_history(tmp, records):
+    """SigenEnergyManager's daily_history.json beside the fixture's ts.db."""
+    import json
+    with open(os.path.join(tmp, te.DAILY_HISTORY_NAME), "w", encoding="utf-8") as fh:
+        json.dump(records, fh)
+
+
+class TestStandingCharges(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_recorded_standing_summed_per_day_and_pro_rated(self):
+        d1, d2 = "2026-09-20", "2026-09-21"
+        slots = _full_day(day=d1) + _full_day(day=d2)
+        ts = _make_timeseries(self.tmp, slots)
+        # Agile has prices for all of day 1 and half of day 2, so the common
+        # set is 72 half-hours: one whole day and half of the next.
+        ag = _make_agile(self.tmp, {s[0]: 10.0 for s in slots[:72]})
+        _write_history(self.tmp, [
+            {"date": d1, "elec_standing_p_day": 60.0},
+            {"date": d2, "elec_standing_p_day": 62.0},
+        ])
+        r = te.run_comparison(ts, ag, "F", date(2026, 9, 20), date(2026, 9, 21),
+                              import_tariff_keys=["tracker", "agile"],
+                              live_standing={"agile": {d1: 70.0, d2: 72.0}})
+        self.assertEqual(r["common_slots"], 72)
+        by = {x["tariff_key"]: x for x in r["results"]}
+        # recorded: 60 for day 1 + 62 x 24/48 for day 2 (not 61.64 x 1.5)
+        self.assertAlmostEqual(by["tracker"]["standing_charge_p"], 91.0, places=2)
+        # Octopus's figure for each day: 70 + 72 x 24/48 (not 53.35 or 70.05 x 1.5)
+        self.assertAlmostEqual(by["agile"]["standing_charge_p"], 106.0, places=2)
+        self.assertEqual(r["standing_sources"]["tracker"], ["recorded"])
+        self.assertEqual(r["standing_sources"]["agile"], ["octopus"])
+        self.assertEqual(r["recorded_standing_fallback_days"], [])
+
+    def test_day_missing_the_field_falls_back_to_octopus_then_the_table(self):
+        d1, d2 = "2026-09-20", "2026-09-21"
+        ts = _make_timeseries(self.tmp, _flux_day(d1) + _flux_day(d2))
+        _write_history(self.tmp, [
+            {"date": d1, "elec_standing_p_day": 60.0},
+            {"date": d2, "home_kwh": 20.0},            # an older record: no field
+        ])
+        kw = dict(import_tariff_keys=["tracker", "flux"], current_tariff_name="Octopus Flux")
+        r = te.run_comparison(ts, os.path.join(self.tmp, "none.db"), "F",
+                              date(2026, 9, 20), date(2026, 9, 21),
+                              live_standing={"flux": {d1: 61.5, d2: 61.5}}, **kw)
+        by = {x["tariff_key"]: x for x in r["results"]}
+        # day 2 takes Octopus's Flux figure, the tariff the row is named after
+        self.assertAlmostEqual(by["tracker"]["standing_charge_p"], 121.5, places=2)
+        self.assertEqual(r["recorded_standing_fallback_days"], [d2])
+        self.assertEqual(r["standing_sources"]["tracker"], ["octopus", "recorded"])
+        self.assertEqual(r["recorded_standing_live_name"], "Octopus Flux")
+
+        # With no Octopus figure the table value is the last resort.
+        r = te.run_comparison(ts, os.path.join(self.tmp, "none.db"), "F",
+                              date(2026, 9, 20), date(2026, 9, 21), **kw)
+        by = {x["tariff_key"]: x for x in r["results"]}
+        table = te.IMPORT_TARIFFS["tracker"]["standing_p_day"]
+        self.assertAlmostEqual(by["tracker"]["standing_charge_p"], 60.0 + table, places=2)
+        self.assertEqual(r["standing_sources"]["tracker"], ["recorded", "table"])
+        flux_table = te.IMPORT_TARIFFS["flux"]["standing_p_day"]
+        self.assertAlmostEqual(by["flux"]["standing_charge_p"], 2 * flux_table, places=2)
+
+    def test_load_recorded_standing_skips_what_it_cannot_use(self):
+        path = os.path.join(self.tmp, te.DAILY_HISTORY_NAME)
+        self.assertEqual(te.load_recorded_standing(path), {})       # no file
+        _write_history(self.tmp, [
+            {"date": "2026-09-01", "elec_standing_p_day": 61.51824, "gas_standing_p_day": 29.06169},
+            {"date": "2026-09-02", "elec_standing_p_day": None},
+            {"date": "2026-09-03", "elec_standing_p_day": "n/a"},
+            {"date": "2026-09-04", "elec_standing_p_day": 0},
+            "not a record",
+            {"elec_standing_p_day": 50.0},
+        ])
+        self.assertEqual(te.load_recorded_standing(path), {"2026-09-01": 61.51824})
+        self.assertEqual(te.load_recorded_standing(path, "gas_standing_p_day"),
+                         {"2026-09-01": 29.06169})
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("{not json")
+        self.assertEqual(te.load_recorded_standing(path), {})
+        self.assertEqual(te.recorded_standing_path(os.path.join(self.tmp, "energy_timeseries.db")),
+                         path)
+
+    def test_octopus_tariffs_no_longer_share_one_made_up_figure(self):
+        for key in ("go", "agile", "cosy", "flux"):
+            self.assertNotEqual(te.IMPORT_TARIFFS[key]["standing_p_day"], 53.35, key)
+            self.assertTrue(te.IMPORT_TARIFFS[key]["octopus_name"], key)
+
+    def test_live_standing_key(self):
+        self.assertEqual(te.live_standing_key("Octopus Flux (forced)"), "flux")
+        self.assertEqual(te.live_standing_key("Agile Octopus"), "agile")
+        self.assertEqual(te.live_standing_key("Octopus Go"), "go")
+        self.assertEqual(te.live_standing_key("Octopus Tracker"), te.TRACKER_LIVE_KEY)
+        self.assertIsNone(te.live_standing_key("Intelligent Octopus Go"))
+        self.assertIsNone(te.live_standing_key("EDF Fixed"))
+        self.assertIsNone(te.live_standing_key(""))
+
+    def test_go_faster_dropped_and_an_old_key_cannot_crash(self):
+        self.assertNotIn("go_faster", te.IMPORT_TARIFFS)
+        ts = _make_timeseries(self.tmp, _full_day())
+        r = te.run_comparison(ts, os.path.join(self.tmp, "none.db"), "F",
+                              date(2026, 7, 1), date(2026, 7, 1),
+                              import_tariff_keys=["go_faster", "ofgem_cap"])
+        self.assertEqual([x["tariff_key"] for x in r["results"]], ["ofgem_cap"])
+
+    def test_format_day_ranges(self):
+        self.assertEqual(te.format_day_ranges(["2026-06-03", "2026-06-04", "2026-06-05",
+                                               "2026-06-09"]),
+                         "3 Jun to 5 Jun and 9 Jun")
+        self.assertEqual(te.format_day_ranges(["2026-06-03"]), "3 Jun")
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -31,6 +31,10 @@ The plugin has Agile prices for less than half the period.
 - Choose **Plugins → Tariff Analyser → Test Octopus API Connection**. If it warns that no tariff was found, check **Octopus region (for Agile prices)** in the settings, using the table on the [Settings](settings.md) page.
 - Check the Mac can reach the internet.
 
+## The log warns it "Could not fetch the" standing charge for a tariff
+
+The plugin could not get that tariff's standing charge from Octopus, usually because the Mac could not reach the internet at the time. The comparison still runs, using the figure it fetched last time or its own figure, and the notes at the foot of the report say which tariffs that applies to. It tries again the next time you run a comparison. If the warning says Octopus has no current tariff by that name, Octopus has renamed or withdrawn it, and the plugin keeps its own figure until it is updated.
+
 ## The report says the tariffs were compared over less than the whole period
 
 At least one tariff has gaps in its prices, so every tariff was priced over the half-hours they all have prices for. The ranking is still like for like, but the pound figures are for that share of the period, not all of it. The **Coverage** column shows which tariff has the gaps.

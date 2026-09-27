@@ -238,3 +238,48 @@ def test_region_menu_uses_the_octopus_letters():
         "K": "South Wales", "L": "South West England", "M": "Yorkshire",
         "N": "South Scotland", "P": "North Scotland",
     }
+
+
+# --- v1.11: Octopus standing charges reach the comparison -----------------------
+
+def test_action_passes_octopus_standing_charges_to_the_comparison(env, monkeypatch):
+    stub, _secrets, tmp = env
+    mod, p = _plugin(tmp, trackerProduct="SILVER-25-04-11", octopusRegion="K")
+    _action_setup(monkeypatch, mod, p, tmp)
+    monkeypatch.setattr(mod.octopus_prices, "missing_days", lambda *a: 0)
+    asked = {}
+
+    def fake(db, region, a, b, names=None, products=None, log_fn=None):
+        asked.update(region=region, names=names, products=products)
+        return {"go": {"2026-09-20": 63.2}}
+    monkeypatch.setattr(mod.octopus_prices, "standing_charges_by_day", fake)
+    seen = {}
+    monkeypatch.setattr(mod.tariff_engine, "run_comparison",
+                        lambda **kw: seen.update(kw) or {"slots": 0})
+    p.actionGenerateReport(_Action({"reportDays": "7"}))
+    assert seen["live_standing"] == {"go": {"2026-09-20": 63.2}}
+    assert asked["region"] == "K"
+    assert asked["names"]["go"] == "Octopus Go"
+    assert set(asked["names"]) == {"go", "agile", "cosy", "flux",
+                                   mod.tariff_engine.TRACKER_LIVE_KEY}
+    assert asked["products"] == {mod.tariff_engine.TRACKER_LIVE_KEY: "SILVER-25-04-11"}
+
+
+def test_standing_charge_failure_is_a_warning_and_the_table_figures_stand(env, monkeypatch):
+    stub, _secrets, tmp = env
+    mod, p = _plugin(tmp)
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(mod.octopus_prices, "standing_charges_by_day", boom)
+    assert p._live_standing(date(2026, 9, 1), date(2026, 9, 2)) == {}
+    assert any("disk full" in w for w in _warnings(stub))
+
+
+def test_nightly_collection_reads_the_timeseries_db_setting(env):
+    _stub_, _secrets, tmp = env
+    mod, p = _plugin(tmp, dbPath="/Volumes/Other/energy_timeseries.db")
+    assert p._build_octopus_config()["timeseries_db"] == "/Volumes/Other/energy_timeseries.db"
+    p.pluginPrefs["dbPath"] = "  "
+    assert p._build_octopus_config()["timeseries_db"] == os.path.join(
+        str(tmp), "Preferences", "Plugins", SIGEN_ID, "energy_timeseries.db")

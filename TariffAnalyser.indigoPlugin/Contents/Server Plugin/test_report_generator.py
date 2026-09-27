@@ -106,5 +106,56 @@ class TestComparisonReportLabels(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+
+class TestStandingNotes(unittest.TestCase):
+
+    def _comp(self, sources, fallback=(), live_name=""):
+        results = [{"tariff_key": k, "tariff_name": te.IMPORT_TARIFFS[k]["name"],
+                    "insufficient_data": False} for k in sources]
+        results[0]["tariff_name"] = "Octopus Flux (actual)"
+        return {"results": results, "standing_sources": sources,
+                "recorded_standing_fallback_days": list(fallback),
+                "recorded_standing_live_name": live_name}
+
+    def test_notes_say_where_each_figure_came_from(self):
+        comp = self._comp({"tracker": ["octopus", "recorded"], "go": ["octopus"],
+                           "flux": ["octopus"], "agile": ["table"],
+                           "ofgem_cap": ["table"]},
+                          fallback=["2026-06-03", "2026-06-04"], live_name="Octopus Flux")
+        notes = rg.standing_notes(comp, "Octopus Flux (actual)")
+        text = " ".join(notes)
+        self.assertIn("uses the standing charge SigenEnergyManager recorded for each day", text)
+        self.assertIn("It recorded none for 3 Jun to 4 Jun, so those days use "
+                      "Octopus's published figure for Octopus Flux.", text)
+        self.assertIn("Octopus Go and Octopus Flux use the standing charge Octopus "
+                      "publishes for your region.", text)
+        self.assertIn("Octopus Agile uses the plugin's own standing charge", text)
+        self.assertIn("Ofgem Price Cap (SVT) uses a typical standing charge last checked", text)
+        self.assertNotIn("may differ", text)
+        self.assertNotIn(";", text)
+
+    def test_report_carries_the_notes_not_the_old_line(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            comp = self._comp({"tracker": ["recorded"]})
+            comp["results"][0].update({"import_cost_p": 100.0, "export_revenue_p": 0.0,
+                                       "standing_charge_p": 61.5, "total_cost_p": 161.5,
+                                       "coverage_pct": 100.0, "own_coverage_pct": 100.0})
+            comp.update({"monthly": {}, "raw_totals": {}, "slots": 48, "days": 1,
+                         "coverage_pct": 100.0,
+                         "recorded_tariff_label": "Octopus Flux (actual)",
+                         "recorded_tariff_note": ""})
+            path, err = rg.generate_report(comp, date(2026, 9, 20), date(2026, 9, 20),
+                                           tmp, "Octopus Outgoing 12p (actual)")
+            self.assertIsNone(err)
+            with open(path, encoding="utf-8") as fh:
+                html = fh.read()
+            self.assertNotIn("Standing charges use published rates and may differ", html)
+            self.assertIn("<li>Octopus Flux (actual) uses the standing charge "
+                          "SigenEnergyManager recorded for each day, which is what you paid.</li>",
+                          html)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

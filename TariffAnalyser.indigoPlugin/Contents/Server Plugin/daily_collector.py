@@ -19,6 +19,8 @@ import urllib.error
 import urllib.parse
 from datetime import datetime, date, timedelta
 
+import tariff_engine
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -27,8 +29,13 @@ _API_BASE             = "https://api.octopus.energy/v1"
 _PAGE_SIZE            = 25000
 _REQUEST_TIMEOUT      = 30
 
-ELEC_STANDING_P_DAY   = 61.52    # pence/day
-GAS_STANDING_P_DAY    = 29.06    # pence/day
+# Standing charges, pence a day. Each is the LAST fallback (v1.11): the actual
+# tariff and gas use the figure SigenEnergyManager recorded for the day in its
+# daily_history.json, and Go and Flux use Octopus's published figure for the
+# region (config "live_standing"). These are the region F figures on
+# 27-09-2026 (tariff_engine.OCTOPUS_STANDING_UPDATED).
+ELEC_STANDING_P_DAY   = 61.51824
+GAS_STANDING_P_DAY    = 29.06169
 EXPORT_RATE_P         = 12.0     # pence/kWh — Octopus Outgoing flat rate
 
 # Octopus Go rates
@@ -36,7 +43,7 @@ GO_CHEAP_P            = 7.5      # pence/kWh 00:30-05:30
 GO_PEAK_P             = 24.0     # pence/kWh all other times
 GO_CHEAP_START        = "00:30"
 GO_CHEAP_END          = "05:30"
-GO_STANDING_P_DAY     = 53.35
+GO_STANDING_P_DAY     = 63.21819
 
 # Octopus Flux rates — current published rates, region F.
 # Fetched live from API where possible; these serve as fallback.
@@ -47,7 +54,7 @@ FLUX_OFFPEAK_START    = "02:00"
 FLUX_OFFPEAK_END      = "05:00"
 FLUX_PEAK_START       = "16:00"
 FLUX_PEAK_END         = "19:00"
-FLUX_STANDING_P_DAY   = 53.35
+FLUX_STANDING_P_DAY   = 61.51824
 
 # Gas kWh conversion: Octopus consumption API returns cubic metres.
 # kWh = m3 * volume_correction (1.02264) * calorific_value (40 MJ/m3) / 3.6
@@ -183,6 +190,11 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
                         blank = no Octopus Tracker fetch, use the recorded price
         solar_install_date  date of the first full solar day, or None for no
                         cut-off (every day with solar data counts)
+        live_standing   {tariff_key: {"YYYY-MM-DD": pence_a_day}} from
+                        octopus_prices.standing_charges_by_day(); "go" and
+                        "flux" are used, else GO_/FLUX_STANDING_P_DAY
+    The actual tariff's and gas's standing charges come from the daily_history.json
+    SigenEnergyManager keeps beside timeseries_db, else the constants.
     """
     def _log(msg, level="INFO"):
         if log_fn:
@@ -222,6 +234,13 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
         gas_unit_rate_p = 6.09
     install_date = config.get("solar_install_date")
 
+    history_path  = tariff_engine.recorded_standing_path(config.get("timeseries_db", ""))
+    elec_standing = tariff_engine.load_recorded_standing(history_path, "elec_standing_p_day")
+    gas_standing  = tariff_engine.load_recorded_standing(history_path, "gas_standing_p_day")
+    live_standing = config.get("live_standing") or {}
+    go_standing   = live_standing.get("go") or {}
+    flux_standing = live_standing.get("flux") or {}
+
     # ------------------------------------------------------------------ build
     rows_written = 0
     cur = date_from
@@ -247,6 +266,13 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
         oct_exp_kwh   = sum(s[1] for s in oct_exp_slots)
         oct_elec_ok   = 1 if oct_imp_slots else 0
 
+        # Standing charges for this day: what was paid, or Octopus's figure,
+        # else the constants
+        elec_sc_p = elec_standing.get(ds, ELEC_STANDING_P_DAY)
+        gas_sc_p  = gas_standing.get(ds, GAS_STANDING_P_DAY)
+        go_sc_p   = go_standing.get(ds, GO_STANDING_P_DAY)
+        flux_sc_p = flux_standing.get(ds, FLUX_STANDING_P_DAY)
+
         # Tracker rate for this day
         tracker_p = tracker_rates.get(ds)
         if tracker_p is None and sg.get("tracker_avg_p"):
@@ -266,7 +292,7 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
         if tracker_p is not None:
             elec_imp_cost_p = billing_imp_kwh * tracker_p
             elec_net_p      = elec_imp_cost_p - elec_exp_rev_p
-            elec_total_p    = elec_net_p + ELEC_STANDING_P_DAY
+            elec_total_p    = elec_net_p + elec_sc_p
         else:
             elec_imp_cost_p = None
             elec_net_p      = None
@@ -295,7 +321,7 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
             )
         go_net_p    = (go_imp_p - elec_exp_rev_p) if go_imp_p is not None else None
         go_save_p   = (
-            (elec_imp_cost_p + ELEC_STANDING_P_DAY) - (go_imp_p + GO_STANDING_P_DAY)
+            (elec_imp_cost_p + elec_sc_p) - (go_imp_p + go_sc_p)
             if (go_imp_p is not None and elec_imp_cost_p is not None) else None
         )
 
@@ -308,14 +334,14 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
             flux_imp_p = _apply_tou_flux(oct_imp_slots, flux_op, flux_sh, flux_pk)
         flux_net_p    = (flux_imp_p - elec_exp_rev_p) if flux_imp_p is not None else None
         flux_save_p   = (
-            (elec_imp_cost_p + ELEC_STANDING_P_DAY) - (flux_imp_p + FLUX_STANDING_P_DAY)
+            (elec_imp_cost_p + elec_sc_p) - (flux_imp_p + flux_sc_p)
             if (flux_imp_p is not None and elec_imp_cost_p is not None) else None
         )
 
         # Gas — _fetch_octopus_gas already converts m3 → kWh
         gas_kwh  = gas_daily.get(ds)
         gas_cost_p       = (gas_kwh * gas_unit_rate_p) if gas_kwh is not None else None
-        gas_total_p      = (gas_cost_p + GAS_STANDING_P_DAY) if gas_cost_p is not None else None
+        gas_total_p      = (gas_cost_p + gas_sc_p) if gas_cost_p is not None else None
         oct_gas_ok       = 1 if gas_kwh is not None else 0
 
         def _gbp(p):
@@ -335,7 +361,7 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
             "elec_import_cost_gbp":     _gbp(elec_imp_cost_p),
             "elec_export_revenue_gbp":  _gbp(elec_exp_rev_p),
             "elec_net_cost_gbp":        _gbp(elec_net_p),
-            "elec_standing_charge_gbp": round(ELEC_STANDING_P_DAY / 100, 4),
+            "elec_standing_charge_gbp": round(elec_sc_p / 100, 4),
             "elec_total_gbp":           _gbp(elec_total_p),
             "cost_without_solar_gbp":   _gbp(cost_no_solar_p),
             "savings_vs_no_solar_gbp":  _gbp(savings_p),
@@ -348,7 +374,7 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
             "gas_kwh":                  gas_kwh,
             "gas_unit_rate_p":          gas_unit_rate_p,
             "gas_cost_gbp":             _gbp(gas_cost_p),
-            "gas_standing_charge_gbp":  round(GAS_STANDING_P_DAY / 100, 4),
+            "gas_standing_charge_gbp":  round(gas_sc_p / 100, 4),
             "gas_total_gbp":            _gbp(gas_total_p),
             "sigen_source":             sigen_src,
             "octopus_elec_complete":    oct_elec_ok,

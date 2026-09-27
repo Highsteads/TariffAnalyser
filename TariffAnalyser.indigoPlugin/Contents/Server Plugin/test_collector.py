@@ -206,5 +206,186 @@ class TestInstallDateSetting(unittest.TestCase):
         self.assertEqual(self._savings(date(2026, 3, 13)), 0.0)
 
 
+
+# ---------------------------------------------------------------------------
+# v1.11 — standing charges from Octopus and from what was paid
+# ---------------------------------------------------------------------------
+
+# Canned Octopus answers in the shape the public API gives (network stubbed).
+_PRODUCTS = {"results": [
+    {"code": "GO-VAR-22-10-14", "display_name": "Octopus Go", "direction": "IMPORT",
+     "available_from": "2022-10-14T00:00:00+01:00"},
+    {"code": "INTELLI-VAR-24-10-29", "display_name": "Intelligent Octopus Go",
+     "direction": "IMPORT", "available_from": "2024-10-29T00:00:00+01:00"},
+    {"code": "FLUX-IMPORT-23-02-14", "display_name": "Octopus Flux Import",
+     "direction": "IMPORT", "available_from": "2023-02-14T00:00:00Z"},
+    {"code": "FLUX-EXPORT-23-02-14", "display_name": "Octopus Flux Export",
+     "direction": "EXPORT", "available_from": "2023-02-14T00:00:00Z"},
+], "next": None}
+_GO_STANDING = {"results": [
+    {"value_inc_vat": 63.21819, "valid_from": "2026-04-30T23:00:00Z", "valid_to": None,
+     "payment_method": None},
+    {"value_inc_vat": 61.51824, "valid_from": "2026-03-31T23:00:00Z",
+     "valid_to": "2026-04-30T23:00:00Z", "payment_method": None},
+], "next": None}
+_FLUX_STANDING = {"results": [
+    {"value_inc_vat": 61.51824, "valid_from": "2026-03-31T23:00:00Z", "valid_to": None,
+     "payment_method": "DIRECT_DEBIT"},
+    {"value_inc_vat": 65.0, "valid_from": "2026-03-31T23:00:00Z", "valid_to": None,
+     "payment_method": "NON_DIRECT_DEBIT"},
+], "next": None}
+
+
+class TestOctopusStandingCharges(unittest.TestCase):
+
+    NAMES = {"go": "Octopus Go", "flux": "Octopus Flux Import"}
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.mkdtemp()
+        self.db = os.path.join(self.tmp, "agile_prices.db")
+        self.urls = []
+        self.logs = []
+        self._saved = op._api_get
+
+    def tearDown(self):
+        import shutil
+        op._api_get = self._saved
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _answer(self, url):
+        self.urls.append(url)
+        if "/products/?" in url:
+            return _PRODUCTS
+        if "/GO-VAR-22-10-14/electricity-tariffs/E-1R-GO-VAR-22-10-14-F/standing-charges/" in url:
+            return _GO_STANDING
+        if "/FLUX-IMPORT-23-02-14/electricity-tariffs/E-1R-FLUX-IMPORT-23-02-14-F/standing-charges/" in url:
+            return _FLUX_STANDING
+        raise AssertionError(f"unexpected URL {url}")
+
+    def _log(self, msg, level="INFO"):
+        self.logs.append((level, msg))
+
+    def _fetch(self, now=1_000_000.0, **kw):
+        return op.standing_charges_by_day(self.db, "F", date(2026, 4, 30), date(2026, 5, 1),
+                                          names=kw.pop("names", self.NAMES),
+                                          log_fn=self._log, now=now, **kw)
+
+    def test_parses_and_picks_the_charge_valid_for_each_day(self):
+        op._api_get = self._answer
+        got = self._fetch()
+        # Go went up at midnight on 1 May (23:00Z on 30 April in BST)
+        self.assertEqual(got["go"], {"2026-04-30": 61.51824, "2026-05-01": 63.21819})
+        # Flux: the direct-debit figure, not the dearer other one
+        self.assertEqual(got["flux"], {"2026-04-30": 61.51824, "2026-05-01": 61.51824})
+        self.assertFalse([m for lvl, m in self.logs if lvl == "WARNING"])
+
+    def test_saved_figures_are_used_for_a_day_without_asking_again(self):
+        op._api_get = self._answer
+        first = self._fetch(now=1_000_000.0)
+
+        def no_network(url):
+            raise AssertionError("fetched again within a day")
+        op._api_get = no_network
+        self.assertEqual(self._fetch(now=1_000_000.0 + 3600), first)
+
+    def test_failed_fetch_falls_back_with_one_warning_per_tariff(self):
+        def down(url):
+            raise OSError("network down")
+        op._api_get = down
+        got = self._fetch()
+        self.assertEqual(got, {})        # the caller's own figures stand
+        warnings = [m for lvl, m in self.logs if lvl == "WARNING"]
+        self.assertEqual(len(warnings), 2)
+        self.assertTrue(any("Octopus Go standing charge" in w for w in warnings))
+        self.assertTrue(any("Octopus Flux Import standing charge" in w for w in warnings))
+        self.assertTrue(all("network down" in w and "plugin's own figure" in w for w in warnings))
+
+    def test_a_tariff_octopus_does_not_sell_is_named_in_the_warning(self):
+        op._api_get = self._answer
+        got = self._fetch(names={"withdrawn": "Octopus Go Faster", "go": "Octopus Go"})
+        self.assertIn("go", got)
+        self.assertNotIn("withdrawn", got)
+        warnings = [m for lvl, m in self.logs if lvl == "WARNING"]
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("Octopus Go Faster", warnings[0])
+
+    def test_known_product_code_skips_the_lookup(self):
+        op._api_get = self._answer
+        got = self._fetch(names={}, products={"octopus_tracker": "GO-VAR-22-10-14"})
+        self.assertEqual(got["octopus_tracker"]["2026-05-01"], 63.21819)
+        self.assertFalse(any("/products/?" in u for u in self.urls))
+
+
+class TestCollectorStandingCharges(unittest.TestCase):
+
+    def _run(self, history, live):
+        import json
+        import shutil
+        import sqlite3
+        import tempfile
+        d1, d2 = "2026-09-20", "2026-09-21"
+        slots = [("03:00", 1.0), ("12:00", 1.0)]
+        stubs = {
+            "_fetch_tracker_rates":       lambda *a, **k: {},
+            "_fetch_flux_rates":          lambda *a, **k: {},
+            "_fetch_octopus_consumption": lambda api, mpan, *a, **k:
+                {d1: slots, d2: slots} if mpan == "import" else {},
+            "_fetch_octopus_gas":         lambda *a, **k: {d1: 10.0, d2: 10.0},
+            "_aggregate_halfhourly":      lambda *a, **k: {d: {
+                "pv_kwh": 0.0, "home_kwh": 2.0, "imp_kwh": 2.0, "exp_kwh": 0.0,
+                "bat_chg": 0.0, "bat_dis": 0.0, "tracker_avg_p": 20.0} for d in (d1, d2)},
+        }
+        saved = {k: getattr(dc, k) for k in stubs}
+        for k, v in stubs.items():
+            setattr(dc, k, v)
+        tmp = tempfile.mkdtemp()
+        try:
+            ts = os.path.join(tmp, "energy_timeseries.db")
+            with open(os.path.join(tmp, "daily_history.json"), "w", encoding="utf-8") as fh:
+                json.dump(history, fh)
+            db = os.path.join(tmp, "summary.db")
+            dc.update_daily_summary(db, date(2026, 9, 20), date(2026, 9, 21),
+                                    {"region": "F", "api_key": "k", "mpan": "import",
+                                     "serial": "s", "timeseries_db": ts,
+                                     "live_standing": live})
+            con = sqlite3.connect(db)
+            con.row_factory = sqlite3.Row
+            rows = {r["date"]: dict(r) for r in con.execute("SELECT * FROM daily_summary")}
+            con.close()
+            return rows
+        finally:
+            for k, v in saved.items():
+                setattr(dc, k, v)
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_recorded_and_live_figures_used_and_missing_day_falls_back(self):
+        rows = self._run(
+            [{"date": "2026-09-20", "elec_standing_p_day": 60.0, "gas_standing_p_day": 30.0},
+             {"date": "2026-09-21"}],                               # no standing recorded
+            {"go": {"2026-09-20": 70.0}, "flux": {"2026-09-20": 50.0}})
+        day1, day2 = rows["2026-09-20"], rows["2026-09-21"]
+        # day 1: what was paid, and Octopus's Go and Flux figures
+        self.assertAlmostEqual(day1["elec_standing_charge_gbp"], 0.60, places=4)
+        self.assertAlmostEqual(day1["elec_total_gbp"], (2 * 20.0 + 60.0) / 100, places=4)
+        self.assertAlmostEqual(day1["gas_standing_charge_gbp"], 0.30, places=4)
+        # Go: 7.5 + 24 = 31.5p of energy. Saving = (40 + 60) - (31.5 + 70)
+        self.assertAlmostEqual(day1["go_saving_vs_tracker_gbp"], -0.015, places=4)
+        # Flux: 7.01 + 21 = 28.01p. Saving = (40 + 60) - (28.01 + 50)
+        self.assertAlmostEqual(day1["flux_saving_vs_tracker_gbp"], 0.2199, places=4)
+        # day 2: nothing recorded, no Octopus figure -> the constants
+        self.assertAlmostEqual(day2["elec_standing_charge_gbp"],
+                               round(dc.ELEC_STANDING_P_DAY / 100, 4), places=4)
+        self.assertAlmostEqual(day2["gas_standing_charge_gbp"],
+                               round(dc.GAS_STANDING_P_DAY / 100, 4), places=4)
+        self.assertAlmostEqual(
+            day2["go_saving_vs_tracker_gbp"],
+            round(((40 + dc.ELEC_STANDING_P_DAY) - (31.5 + dc.GO_STANDING_P_DAY)) / 100, 4),
+            places=4)
+
+    def test_fallback_constants_are_octopus_region_f_figures(self):
+        self.assertEqual(dc.GO_STANDING_P_DAY, 63.21819)
+        self.assertEqual(dc.FLUX_STANDING_P_DAY, 61.51824)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

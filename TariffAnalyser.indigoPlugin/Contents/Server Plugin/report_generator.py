@@ -38,6 +38,77 @@ def export_tariff_label(export_tariff_name, rate_p, flat_rate_known=True):
     return f"{export_tariff_name} at {price}"
 
 
+def _join_names(names):
+    names = list(names)
+    if len(names) <= 1:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _uk_date(iso):
+    try:
+        d = datetime.strptime(iso, "%Y-%m-%d").date()
+        return f"{d.day} {d.strftime('%b %Y')}"
+    except (TypeError, ValueError):
+        return str(iso)
+
+
+def standing_notes(comparison, actual_label):
+    """The report's notes on where each standing charge came from (v1.11),
+    as plain sentences. Until v1.11 a single line said standing charges "use
+    published rates and may differ", while the actual row used a fixed Tracker
+    figure and every Octopus tariff a fixed 53.35p."""
+    sources = comparison.get("standing_sources") or {}
+    names   = {r["tariff_key"]: r["tariff_name"]
+               for r in comparison.get("results", []) if not r.get("insufficient_data")}
+    notes = []
+
+    if "tracker" in sources:
+        text = (f"{actual_label} uses the standing charge SigenEnergyManager "
+                f"recorded for each day, which is what you paid.")
+        missing = comparison.get("recorded_standing_fallback_days") or []
+        if missing:
+            table = format_pence(tariff_engine.IMPORT_TARIFFS["tracker"]["standing_p_day"])
+            live_name = comparison.get("recorded_standing_live_name", "")
+            used = sources["tracker"]
+            if "octopus" in used and "table" in used:
+                src = (f"Octopus's published figure for {live_name} where it had one, "
+                       f"and the plugin's own figure of {table} a day otherwise")
+            elif "octopus" in used:
+                src = f"Octopus's published figure for {live_name}"
+            else:
+                src = f"the plugin's own figure of {table} a day"
+            text += (f" It recorded none for {tariff_engine.format_day_ranges(missing)}, "
+                     f"so those days use {src}.")
+        notes.append(text)
+
+    live_ok, live_short, others = [], [], []
+    for key, used in sources.items():
+        if key == "tracker" or key not in names:
+            continue
+        tariff = tariff_engine.IMPORT_TARIFFS.get(key, {})
+        if tariff.get("octopus_name"):
+            (live_short if "table" in used else live_ok).append(names[key])
+        else:
+            others.append(names[key])
+    if live_ok:
+        verb = "uses" if len(live_ok) == 1 else "use"
+        notes.append(f"{_join_names(live_ok)} {verb} the standing charge Octopus "
+                     f"publishes for your region.")
+    if live_short:
+        verb = "uses" if len(live_short) == 1 else "use"
+        notes.append(f"{_join_names(live_short)} {verb} the plugin's own standing "
+                     f"charge, Octopus's figure for North East England on "
+                     f"{_uk_date(tariff_engine.OCTOPUS_STANDING_UPDATED)}, wherever "
+                     f"Octopus's figure for your region could not be fetched. The "
+                     f"Event Log says why.")
+    if others:
+        verb = "uses a typical standing charge" if len(others) == 1 else "use typical standing charges"
+        notes.append(f"{_join_names(others)} {verb} last checked "
+                     f"{_uk_date(tariff_engine.REFERENCE_RATES_UPDATED)}.")
+    return notes
+
+
 def generate_report(comparison, date_from, date_to, output_dir, export_tariff_name):
     """Write the tariff comparison as an HTML page (replaces v1.0 CSV output).
 
@@ -186,6 +257,8 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
         self_suff = (1.0 - totals.get("grid_import_kwh", 0) / home_kwh) * 100.0
         self_suff_str = f'<div class="totalrow"><span>Self-sufficiency</span><span>{self_suff:.1f}%</span></div>'
 
+    standing_html = "\n    ".join(f"<li>{n}</li>" for n in standing_notes(comparison, actual_label))
+
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -269,10 +342,10 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
 
   <h2>Notes</h2>
   <ul class="notes">
-    <li>Comparison assumes identical energy consumption patterns across all tariffs.  Real savings on time-of-use tariffs (Go, Go Faster, Cosy, Flux, Agile) may be higher because battery dispatch would be optimised for cheap windows.</li>
+    <li>Comparison assumes identical energy consumption patterns across all tariffs.  Real savings on time-of-use tariffs (Go, Cosy, Flux, Agile) may be higher because battery dispatch would be optimised for cheap windows.</li>
     <li>Every tariff is priced over the same set of half-hourly slots — those where all selected tariffs had a price — so the ranking is like-for-like.  The Coverage column shows each tariff's own data availability; when it is below 100% the £ totals are for the covered portion of the period.</li>
-    <li>{actual_label} uses the prices SigenEnergyManager recorded for each half-hour, and Agile uses Octopus's published prices.  The other tariffs (Go, Cosy, Flux, Ofgem cap, and the fixed suppliers) use illustrative "typical" published rates last checked {tariff_engine.REFERENCE_RATES_UPDATED} — treat them as a guide, not your exact contract.</li>
-    <li>Standing charges use published rates and may differ from your actual contract.</li>
+    <li>{actual_label} uses the prices SigenEnergyManager recorded for each half-hour, and Agile uses Octopus's published prices.  The other tariffs (Go, Cosy, Flux, Ofgem cap, and the fixed suppliers) use illustrative "typical" published unit prices last checked {tariff_engine.REFERENCE_RATES_UPDATED} — treat them as a guide, not your exact contract.</li>
+    {standing_html}
     <li>All costs include VAT at 5%.</li>
   </ul>
 </body>
