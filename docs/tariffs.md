@@ -5,7 +5,7 @@ nav_order: 4
 
 # The tariffs it compares
 
-Two of the tariffs use real prices: Tracker uses the price SigenEnergyManager recorded for each half-hour, and Agile uses the prices Octopus published for your region. The others use the typical published prices written into the plugin, which were last checked on 2 May 2026. Treat those as a guide, not as your exact contract — prices change, and the report prints the date they were checked.
+Two of the tariffs use real prices: the first row uses the price SigenEnergyManager recorded for each half-hour, which is the price you actually paid, and Agile uses the prices Octopus published for your region. The others use the typical published prices written into the plugin, which were last checked on 2 May 2026. Treat those as a guide, not as your exact contract — prices change, and the report prints the date they were checked.
 
 All prices include VAT.
 
@@ -13,9 +13,11 @@ All prices include VAT.
 
 These are the tariffs you buy electricity on. The names are as they appear in the report.
 
+The first row is named after the tariff you were on, such as **Octopus Tracker (actual)** or **Octopus Flux (actual)**. The plugin takes the name from SigenEnergyManager's Tariff Monitor and checks it against the pattern of the recorded prices — one price a day for Tracker, a few bands a day for Flux or Go, a new price every half-hour for Agile. If the name does not fit the prices it shows **Your tariff (actual)**, and if your tariff changed during the period it shows **Your tariffs (actual, mixed)** and the report says when it changed. Its standing charge is the Tracker one in the plugin, 61.64p a day, whatever the tariff.
+
 | Tariff | Unit price | Standing charge |
 |---|---|---|
-| **Octopus Tracker (actual)** | The price SigenEnergyManager recorded for each half-hour | 61.64p a day |
+| **Your tariff (actual)** | The price SigenEnergyManager recorded for each half-hour | 61.64p a day |
 | **Octopus Go** | 7.5p from 12:30am to 5:30am, 24p the rest of the day | 53.35p a day |
 | **Octopus Go Faster** | 7.5p from 11:30pm to 5:30am, 24p the rest of the day | 53.35p a day |
 | **Octopus Agile** | Octopus's published price for each half-hour in your region, capped at 100p | 53.35p a day |

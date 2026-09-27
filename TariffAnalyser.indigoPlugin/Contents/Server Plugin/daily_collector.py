@@ -12,6 +12,7 @@
 
 import base64
 import json
+import re
 import sqlite3
 import urllib.request
 import urllib.error
@@ -52,11 +53,44 @@ FLUX_STANDING_P_DAY   = 53.35
 # kWh = m3 * volume_correction (1.02264) * calorific_value (40 MJ/m3) / 3.6
 GAS_KWH_PER_M3        = 11.363   # = 1.02264 * 40 / 3.6
 
-# Tracker product for rate history backfill (region F)
-TRACKER_PRODUCT       = "SILVER-25-04-11"
-TRACKER_TARIFF_PREFIX = "E-1R-SILVER-25-04-11-"
+# The Tracker product code and the solar install date used to be fixed here for
+# one house (SILVER-25-04-11, 13-03-2026). Both are now settings, passed in the
+# config dict as "tracker_product" and "solar_install_date"; blank means no
+# Octopus Tracker fetch and no install-date cut-off. The region always comes
+# from the region setting.
+_TRACKER_PRODUCT_RE = re.compile(r"^[A-Z0-9]+(?:-[A-Z0-9]+)*$")
+_TRACKER_TARIFF_RE  = re.compile(r"^E-1R-(?P<product>[A-Z0-9-]+)-[A-Z]$")
 
-SOLAR_INSTALL_DATE    = date(2026, 3, 13)   # first full day of operation
+
+def normalise_tracker_product(raw):
+    """Tracker product code from a setting: "" when blank, the product code
+    when given either the product (SILVER-25-04-11) or a full tariff code
+    (E-1R-SILVER-25-04-11-F). Raises ValueError for anything else."""
+    text = str(raw or "").strip().upper()
+    if not text:
+        return ""
+    m = _TRACKER_TARIFF_RE.match(text)
+    if m:
+        text = m.group("product")
+    if not _TRACKER_PRODUCT_RE.match(text):
+        raise ValueError(f"not a Tracker product code: {raw!r}")
+    return text
+
+
+def parse_install_date(raw):
+    """Solar install date from a setting: None when blank, else a date from
+    YYYY-MM-DD (or DD/MM/YYYY). Raises ValueError for anything else."""
+    if isinstance(raw, date):
+        return raw
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    raise ValueError(f"not a date: {raw!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +179,10 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
         region          Octopus region letter (default 'F')
         gas_unit_rate_p Gas unit rate in pence/kWh (for cost calc)
         timeseries_db   Path to SigenEnergyManager energy_timeseries.db
+        tracker_product Octopus Tracker product code (e.g. SILVER-25-04-11);
+                        blank = no Octopus Tracker fetch, use the recorded price
+        solar_install_date  date of the first full solar day, or None for no
+                        cut-off (every day with solar data counts)
     """
     def _log(msg, level="INFO"):
         if log_fn:
@@ -158,7 +196,8 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
     _log(f"Updating {date_from} to {date_to} ({(date_to - date_from).days + 1} days)")
 
     # ------------------------------------------------------------------ fetch
-    tracker_rates  = _fetch_tracker_rates(date_from, date_to, region, _log)
+    tracker_rates  = _fetch_tracker_rates(date_from, date_to, region,
+                                          config.get("tracker_product", ""), _log)
     flux_rates     = _fetch_flux_rates(region, _log)
     elec_slots     = _fetch_octopus_consumption(
         api_key, config.get("mpan", ""), config.get("serial", ""),
@@ -177,7 +216,11 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
     )
     existing_rows  = _load_existing_summary_rows(db_path, date_from, date_to)
 
-    gas_unit_rate_p = float(config.get("gas_unit_rate_p", 6.09))
+    try:
+        gas_unit_rate_p = float(config.get("gas_unit_rate_p", 6.09))
+    except (TypeError, ValueError):
+        gas_unit_rate_p = 6.09
+    install_date = config.get("solar_install_date")
 
     # ------------------------------------------------------------------ build
     rows_written = 0
@@ -229,8 +272,9 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
             elec_net_p      = None
             elec_total_p    = None
 
-        # Savings vs no solar — only meaningful from solar install date
-        if cur >= SOLAR_INSTALL_DATE and tracker_p and home_kwh > 0:
+        # Savings vs no solar — only meaningful from the solar install date,
+        # when one is set
+        if (install_date is None or cur >= install_date) and tracker_p and home_kwh > 0:
             cost_no_solar_p    = home_kwh * tracker_p
             savings_p          = (cost_no_solar_p - elec_imp_cost_p) + elec_exp_rev_p
         elif tracker_p is not None:
@@ -344,9 +388,6 @@ def get_daily_summary_rows(db_path, date_from, date_to):
 # Sigenergy File 2 (daily XLSX) import
 # ---------------------------------------------------------------------------
 
-SIGEN_FILE2_PATH = "/Users/indigo/Documents/excel-logs-file 4/stationData-739105.xlsx"
-
-
 def import_sigenergy_file2(db_path, xlsx_path=None, log_fn=None):
     """Read daily energy data from Sigenergy export XLSX and upsert into daily_summary.
 
@@ -361,8 +402,10 @@ def import_sigenergy_file2(db_path, xlsx_path=None, log_fn=None):
         if log_fn:
             log_fn(msg, level=level)
 
-    if xlsx_path is None:
-        xlsx_path = SIGEN_FILE2_PATH
+    # No default file: the old default was one house's own export path.
+    if not xlsx_path:
+        _log("No Sigenergy daily export file given - nothing imported", level="WARNING")
+        return 0
 
     _log(f"Importing Sigenergy File 2: {xlsx_path}")
 
@@ -689,15 +732,23 @@ def _fetch_octopus_gas(api_key, mprn, gas_serial, date_from, date_to, log_fn):
 # Octopus Tracker historical rates
 # ---------------------------------------------------------------------------
 
-def _fetch_tracker_rates(date_from, date_to, region, log_fn):
-    """Fetch historical Tracker (SILVER-25-04-11) unit rates for the date range.
+def _fetch_tracker_rates(date_from, date_to, region, product, log_fn):
+    """Fetch historical Tracker unit rates for the date range.
+
+    product is the Octopus Tracker product code (e.g. SILVER-25-04-11) from the
+    settings; blank returns {} without calling the API, so each day falls back
+    to the price SigenEnergyManager recorded. The tariff code is built from the
+    product and the region setting.
 
     Returns {date_str: rate_p}. Uses public (unauthenticated) Octopus API.
     The Tracker tariff has one rate per day stored as standard-unit-rates entries.
     """
-    tariff_code = f"{TRACKER_TARIFF_PREFIX}{region}"
+    if not product:
+        log_fn("No Tracker product code set - using the prices SigenEnergyManager recorded")
+        return {}
+    tariff_code = f"E-1R-{product}-{region}"
     url = (
-        f"{_API_BASE}/products/{TRACKER_PRODUCT}/electricity-tariffs/"
+        f"{_API_BASE}/products/{product}/electricity-tariffs/"
         f"{tariff_code}/standard-unit-rates/"
     )
     params = {

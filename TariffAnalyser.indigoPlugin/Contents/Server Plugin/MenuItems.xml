@@ -14,8 +14,8 @@
 
     <!-- ==================================================================
          Tariff Comparison
-         What would the same energy data have cost on every UK tariff over
-         a chosen lookback period?  Single dropdown - no date pickers.
+         What would the same energy data have cost on each of the tariffs in
+         tariff_engine.IMPORT_TARIFFS over a chosen lookback period?  Single dropdown - no date pickers.
          Opens HTML in default browser.
          ================================================================== -->
     <MenuItem id="tariffComparison">
@@ -24,7 +24,7 @@
         <ButtonTitle>Run Comparison</ButtonTitle>
         <ConfigUI>
             <Field id="instructions" type="label" fontSize="small">
-                <Label>Compares your actual half-hourly energy usage against every UK tariff (Tracker, Flexible, Go, Intelligent Go, Flux, Intelligent Flux, Agile) over the chosen period. Highlights which would have been cheapest - useful before switching.</Label>
+                <Label>Prices your actual half-hourly energy use on eleven tariffs over the chosen period: the prices you actually paid, Octopus Go, Go Faster, Agile, Cosy and Flux, Economy 7, the Ofgem price cap, and typical fixed deals from E.ON Next, EDF and Scottish Power. Highlights which would have been cheapest - useful before switching.</Label>
             </Field>
             <Field id="lookbackDays" type="menu" defaultValue="30">
                 <Label>Comparison period:</Label>

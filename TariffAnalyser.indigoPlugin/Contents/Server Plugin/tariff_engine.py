@@ -8,6 +8,7 @@
 # Version:     1.0
 
 import sqlite3
+from collections import Counter
 from datetime import datetime, timedelta
 
 # The date the hardcoded "typical" fixed tariffs and standing charges below were
@@ -22,13 +23,18 @@ REFERENCE_RATES_UPDATED = "2026-05-02"
 #   fixed        - single unit rate all hours
 #   tou          - time-of-use: cheap window + peak rate
 #   tou_multi    - multiple cheap windows (Cosy)
-#   variable_db  - rate stored per-slot in the timeseries DB (Tracker actual)
+#   variable_db  - rate stored per-slot in the timeseries DB (the prices the
+#                  user actually paid, whatever tariff SigenEnergyManager's
+#                  tariff monitor was on — see recorded_tariff_label())
 #   agile        - half-hourly rate from agile_prices DB
 # ---------------------------------------------------------------------------
 
 IMPORT_TARIFFS = {
+    # Key kept as "tracker" for compatibility; the column holds whatever tariff
+    # SigenEnergyManager recorded (Tracker, then Flux from 17-09-2026 on the
+    # author's house). run_comparison() names the row from the data.
     "tracker": {
-        "name":              "Octopus Tracker (actual)",
+        "name":              "Your tariff (actual)",
         "type":              "variable_db",
         "standing_p_day":    61.64,
     },
@@ -202,6 +208,7 @@ def run_comparison(
     date_to,
     import_tariff_keys=None,
     export_tariff_key="outgoing_12p",
+    current_tariff_name="",
 ):
     """Run tariff comparison over the given date range.
 
@@ -214,6 +221,9 @@ def run_comparison(
         import_tariff_keys:  list of keys from IMPORT_TARIFFS to compare;
                              None = all
         export_tariff_key:   key from EXPORT_TARIFFS to use for all import tariffs
+        current_tariff_name: the tariff SigenEnergyManager's tariff monitor says
+                             is active now (e.g. "Octopus Flux"), used to name
+                             the recorded-prices row; "" when unknown
 
     Returns a dict:
         {
@@ -265,6 +275,11 @@ def run_comparison(
     # --- Pass 1: resolve every tariff's per-slot rate and count own coverage ---
     slot_rates = []   # [(slot_start, imp_kwh, exp_kwh, {key: rate}), ...]
     raw_valid  = {k: 0 for k in import_tariff_keys}
+    day_prices = _day_price_counts(rows)
+    recorded_label, recorded_note = recorded_tariff_label(day_prices, current_tariff_name)
+    names = {k: IMPORT_TARIFFS[k]["name"] for k in import_tariff_keys}
+    if "tracker" in names:
+        names["tracker"] = recorded_label
     for row in rows:
         (slot_start, slot_end,
          imp_kwh, exp_kwh, pv_kwh, home_kwh,
@@ -341,7 +356,7 @@ def run_comparison(
         own_cov  = (raw_valid[key] / total_slots * 100.0) if total_slots else 0.0
         results.append({
             "tariff_key":        key,
-            "tariff_name":       tariff["name"],
+            "tariff_name":       names[key],
             "import_cost_p":     round(a["import_p"],   2),
             "export_revenue_p":  round(a["export_p"],   2),
             "net_cost_p":        round(net,              2),
@@ -362,11 +377,10 @@ def run_comparison(
     for key in import_tariff_keys:
         if key in ranked_keys:
             continue
-        tariff  = IMPORT_TARIFFS[key]
         own_cov = (raw_valid[key] / total_slots * 100.0) if total_slots else 0.0
         results.append({
             "tariff_key":        key,
-            "tariff_name":       tariff["name"],
+            "tariff_name":       names[key],
             "import_cost_p":     None,
             "export_revenue_p":  None,
             "net_cost_p":        None,
@@ -386,16 +400,20 @@ def run_comparison(
         "monthly":        monthly,
         "monthly_common": monthly_common,
         "raw_totals":     {k: round(v, 3) for k, v in totals.items()},
+        "recorded_tariff_label": recorded_label,
+        "recorded_tariff_note":  recorded_note,
     }
 
 
 def calculate_savings(db_path, export_rate_p, date_from, date_to):
-    """Calculate solar savings for a date range against the actual Tracker tariff.
+    """Calculate solar savings for a date range against the prices actually paid
+    (the per-slot price SigenEnergyManager recorded — Tracker, Flux or whatever
+    tariff its tariff monitor was on; see recorded_tariff_label()).
 
     Savings = what you would have paid without solar − what you actually paid.
-    - Avoided import: solar/battery energy used at home × Tracker rate per slot
+    - Avoided import: solar/battery energy used at home × recorded rate per slot
     - Export revenue: grid export × flat export rate
-    Falls back to Ofgem cap (24.5p) for slots with no Tracker price.
+    Falls back to Ofgem cap (24.5p) for slots with no recorded price.
 
     Returns a dict:
         pv_kwh             total solar generated (kWh)
@@ -465,6 +483,148 @@ def calculate_savings(db_path, export_rate_p, date_from, date_to):
         "cost_without_solar_p": round(cost_no_solar_p,  2),
         "slots":               len(rows),
     }
+
+
+# ---------------------------------------------------------------------------
+# Which tariff do the recorded prices belong to?
+# ---------------------------------------------------------------------------
+# The halfhourly table's price column is named tracker_price_p, but it holds the
+# rate of whatever tariff SigenEnergyManager's tariff monitor was on for that
+# half-hour. On the author's house that was Tracker until 17-09-2026 and Flux
+# after, with an Agile rehearsal in between. The table records no tariff name,
+# so the shape of each day's prices says what kind of tariff it was:
+#   flat        one price all day (Tracker, Flexible)
+#   tou         a few prices in fixed bands (Go, Flux, Cosy)
+#   halfhourly  a new price nearly every half-hour (Agile)
+
+# A day needs at least this many priced half-hours to be classified, so a day
+# still in progress, or one with gaps, cannot pass for a flat-rate day.
+_MIN_CLASSIFY_SLOTS = 40
+# A price must appear in at least this many half-hours of a day to count as a
+# band. The slot either side of midnight can carry yesterday's Tracker price,
+# which would otherwise make a Tracker day look like a two-band tariff.
+_BAND_MIN_SLOTS = 3
+# More distinct prices than this in one day is a half-hourly tariff.
+_TOU_MAX_PRICES = 6
+
+_PATTERN_WORDS = {
+    "flat":       "one price a day",
+    "tou":        "time-of-use bands",
+    "halfhourly": "a new price every half-hour",
+}
+
+# The pattern each tariff name implies, for checking the name really fits the
+# data before putting it on the row.
+_NAME_PATTERNS = (
+    ("agile",    "halfhourly"),
+    ("tracker",  "flat"),
+    ("flexible", "flat"),
+    ("flux",     "tou"),
+    ("cosy",     "tou"),
+    ("go",       "tou"),
+)
+
+GENERIC_RECORDED_NAME = "Your tariff (actual)"
+
+
+def clean_tariff_name(raw):
+    """Tidy SigenEnergyManager's tariffActive state into a display name, or ""
+    when it holds no real tariff ("", "Unknown", "Initialising", "?")."""
+    name = str(raw or "").strip()
+    if name.lower().endswith("(forced)"):
+        name = name[:-len("(forced)")].strip()
+    if name.lower() in ("", "unknown", "initialising", "?", "none"):
+        return ""
+    return name
+
+
+def _expected_pattern(name):
+    words = name.lower().replace("-", " ").split()
+    for word, pattern in _NAME_PATTERNS:
+        if word in words:
+            return pattern
+    return None
+
+
+def _day_price_counts(rows):
+    """{date_str: Counter({price: slots})} from _load_timeseries rows."""
+    days = {}
+    for row in rows:
+        price = row[9]
+        if price is None:
+            continue
+        days.setdefault(row[0][:10], Counter())[round(float(price), 4)] += 1
+    return days
+
+
+def _day_pattern(prices):
+    """Classify one day's Counter of prices, or None if too few to tell."""
+    if sum(prices.values()) < _MIN_CLASSIFY_SLOTS:
+        return None
+    if len(prices) > _TOU_MAX_PRICES:
+        return "halfhourly"
+    bands = sum(1 for n in prices.values() if n >= _BAND_MIN_SLOTS)
+    return "flat" if bands <= 1 else "tou"
+
+
+def recorded_tariff_label(day_prices, current_name=""):
+    """Name the recorded-prices row from the data, not from a fixed label.
+
+    day_prices:   {date_str: Counter({price: slots})}
+    current_name: the tariff SigenEnergyManager says is active now, or "".
+                  It is only used for the latest run of days, and only when
+                  its kind matches that run's price pattern.
+
+    Returns (label, note). note is "" when the whole period shows one pattern,
+    otherwise a plain-English line saying when the pattern changed.
+    """
+    current_name = clean_tariff_name(current_name)
+    runs = []   # [[pattern, first_date, last_date], ...]
+    for ds in sorted(day_prices):
+        pattern = _day_pattern(day_prices[ds])
+        if pattern is None:
+            continue
+        if runs and runs[-1][0] == pattern:
+            runs[-1][2] = ds
+        else:
+            runs.append([pattern, ds, ds])
+
+    latest_pattern = runs[-1][0] if runs else None
+    expected = _expected_pattern(current_name) if current_name else None
+    name_fits = bool(current_name) and (
+        expected is None or latest_pattern is None or expected == latest_pattern)
+
+    if len(runs) <= 1:
+        if name_fits:
+            return f"{current_name} (actual)", ""
+        return GENERIC_RECORDED_NAME, ""
+
+    def _day(ds):
+        try:
+            return datetime.strptime(ds, "%Y-%m-%d").strftime("%-d %b")
+        except ValueError:
+            return ds
+
+    parts = []
+    for i, (pattern, first, last) in enumerate(runs):
+        words = _PATTERN_WORDS[pattern]
+        if i == len(runs) - 1:
+            tail = f" ({current_name})" if name_fits else ""
+            parts.append(f"{words}{tail} from {_day(first)}")
+        elif i == 0:
+            parts.append(f"{words} to {_day(last)}")
+        else:
+            parts.append(f"{words} {_day(first)} to {_day(last)}")
+    joined = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+    note = (f"Your tariff changed during this period. The prices SigenEnergyManager "
+            f"recorded show {joined}. The actual-prices row covers all of them.")
+    return "Your tariffs (actual, mixed)", note
+
+
+def recorded_tariff_for_period(timeseries_db_path, date_from, date_to, current_name=""):
+    """recorded_tariff_label() for a date range read from the timeseries DB."""
+    rows = _load_timeseries(timeseries_db_path, date_from, date_to)
+    return recorded_tariff_label(_day_price_counts(rows), current_name)
 
 
 def get_coverage(timeseries_db_path):

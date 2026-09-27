@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Actions>
 
-    <!-- Generate the Tariff Comparison HTML report (schedulable). -->
+    <!-- Generate the Tariff Comparison HTML report (schedulable). Fetches any
+         Agile prices missing for the period first, as the menu item does. -->
     <Action id="generateReport" uiPath="PluginActions">
         <Name>Generate Tariff Comparison Report</Name>
         <CallbackMethod>actionGenerateReport</CallbackMethod>
@@ -21,8 +22,10 @@
         </ConfigUI>
     </Action>
 
-    <!-- Refresh the Octopus Agile price cache (auto-run nightly; expose as
-         schedulable action for manual / override use). -->
+    <!-- Refresh the Octopus Agile price cache. NOT run automatically: the
+         Tariff Comparison (menu and action) fetches any prices missing for its
+         own period before pricing it. Schedule this to keep the cache topped up
+         for the number of days in the Default report date range setting. -->
     <Action id="updatePrices" uiPath="PluginActions">
         <Name>Update Octopus Agile Price Data</Name>
         <CallbackMethod>actionUpdatePrices</CallbackMethod>

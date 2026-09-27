@@ -13,11 +13,37 @@ from datetime import date, datetime, timedelta
 import tariff_engine
 
 
+def format_pence(p):
+    """A price in pence as a person writes it: 12p, 7.5p, 1.63p — never a
+    rounded figure that changes the price (the SEG minimum showed as "2p")."""
+    try:
+        value = float(p)
+    except (TypeError, ValueError):
+        return "?p"
+    text = f"{value:.2f}".rstrip("0").rstrip(".")
+    return f"{text}p"
+
+
+def export_tariff_label(export_tariff_name, rate_p, flat_rate_known=True):
+    """Header text for the export tariff: its real name and the price used.
+
+    flat_rate_known is False for a tariff with no single flat rate (Agile
+    Outgoing), which the Energy Summary prices at a stand-in flat rate."""
+    price = format_pence(rate_p)
+    if not flat_rate_known:
+        return (f"{export_tariff_name}, counted at a flat {price} "
+                f"(it has no single rate)")
+    if price in export_tariff_name:
+        return export_tariff_name
+    return f"{export_tariff_name} at {price}"
+
+
 def generate_report(comparison, date_from, date_to, output_dir, export_tariff_name):
     """Write the tariff comparison as an HTML page (replaces v1.0 CSV output).
 
-    The page ranks every UK tariff by total cost over the chosen period,
-    highlights Tracker (the user's current default), and breaks down each
+    The page ranks every tariff in tariff_engine.IMPORT_TARIFFS by total cost
+    over the chosen period, highlights the prices actually paid (the row named
+    from the recorded data by tariff_engine.recorded_tariff_label), and breaks down each
     tariff's import cost / export revenue / standing charge / coverage.
 
     Returns (path, error_string).  error_string is None on success.
@@ -34,6 +60,9 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
     slots          = comparison.get("slots", 0)
     days           = comparison.get("days", 0)
     coverage_pct   = comparison.get("coverage_pct", 100.0)
+    actual_label   = comparison.get("recorded_tariff_label",
+                                    tariff_engine.GENERIC_RECORDED_NAME)
+    actual_note    = comparison.get("recorded_tariff_note", "")
 
     # Ranked tariffs (had enough data to compare); insufficient ones are shown
     # separately below, never mixed into the ranking.
@@ -105,6 +134,11 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
             f'the period (the ranking is like-for-like). The Coverage column '
             f'shows each tariff\'s own data availability.</p>'
         )
+
+    # The recorded prices changed tariff part-way through the period — say so,
+    # so the actual-prices row is not read as one tariff for the whole period.
+    if actual_note:
+        coverage_note += f'<p class="note warn">{actual_note}</p>'
 
     # --- monthly breakdown ----------------------------------------------
     monthly_html = ""
@@ -213,7 +247,7 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
   </div>
 
   <h2>Tariff ranking</h2>
-  <p class="note">★ cheapest, ✘ most expensive.  Cost = import - export + standing charges.  Compared against Tracker (your current).</p>
+  <p class="note">★ cheapest, ✘ most expensive.  Cost = import - export + standing charges.  Compared against the prices you actually paid ({actual_label}).</p>
   {coverage_note}
   <table>
     <thead>
@@ -224,7 +258,7 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
         <th>Import</th>
         <th>Export</th>
         <th>Standing</th>
-        <th>vs Tracker</th>
+        <th>vs actual</th>
         <th>Coverage</th>
       </tr>
     </thead>
@@ -235,9 +269,9 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
 
   <h2>Notes</h2>
   <ul class="notes">
-    <li>Comparison assumes identical energy consumption patterns across all tariffs.  Real savings on time-of-use tariffs (Go, Intelligent Go, Agile) may be higher because battery dispatch would be optimised for cheap windows.</li>
+    <li>Comparison assumes identical energy consumption patterns across all tariffs.  Real savings on time-of-use tariffs (Go, Go Faster, Cosy, Flux, Agile) may be higher because battery dispatch would be optimised for cheap windows.</li>
     <li>Every tariff is priced over the same set of half-hourly slots — those where all selected tariffs had a price — so the ranking is like-for-like.  The Coverage column shows each tariff's own data availability; when it is below 100% the £ totals are for the covered portion of the period.</li>
-    <li>Tracker and Agile use live rates.  The other tariffs (Go, Cosy, Flux, Ofgem cap, and the fixed suppliers) use illustrative "typical" published rates last checked {tariff_engine.REFERENCE_RATES_UPDATED} — treat them as a guide, not your exact contract.</li>
+    <li>{actual_label} uses the prices SigenEnergyManager recorded for each half-hour, and Agile uses Octopus's published prices.  The other tariffs (Go, Cosy, Flux, Ofgem cap, and the fixed suppliers) use illustrative "typical" published rates last checked {tariff_engine.REFERENCE_RATES_UPDATED} — treat them as a guide, not your exact contract.</li>
     <li>Standing charges use published rates and may differ from your actual contract.</li>
     <li>All costs include VAT at 5%.</li>
   </ul>
@@ -266,9 +300,16 @@ def open_in_browser(filepath, log_fn=None):
         return False
 
 
-def generate_savings_summary(db_path, output_dir, export_rate_p=12.0, log_fn=None):
+def generate_savings_summary(db_path, output_dir, export_rate_p=12.0, log_fn=None,
+                             export_label=None, tariff_label=None, tariff_note=""):
     """Generate a standalone HTML page showing solar savings for today, this
     week, this month, this year, and all time.
+
+    export_label: header text naming the export tariff and its price (see
+                  export_tariff_label()); defaults to the bare price.
+    tariff_label: name of the tariff whose recorded prices the savings use
+                  (see tariff_engine.recorded_tariff_label()).
+    tariff_note:  shown under the header when that tariff changed.
 
     Returns (path, error_string).
     """
@@ -302,6 +343,12 @@ def generate_savings_summary(db_path, output_dir, export_rate_p=12.0, log_fn=Non
             sections.append((label, d_from, d_to, s))
 
     generated_at = datetime.now().strftime("%d/%m/%Y %H:%M")
+    if not export_label:
+        export_label = f"flat {format_pence(export_rate_p)}"
+    if not tariff_label:
+        tariff_label = tariff_engine.GENERIC_RECORDED_NAME
+    tariff_note_html = (f'<p class="tariff-note">{tariff_note}</p>'
+                        if tariff_note else "")
 
     def fmt_gbp(p):
         return f"£{p/100:.2f}"
@@ -416,6 +463,8 @@ def generate_savings_summary(db_path, output_dir, export_rate_p=12.0, log_fn=Non
   .pv   {{ color: #e65100; }}
   .note {{ color: #999; font-size: 0.82em; font-weight: 400; }}
 
+  .tariff-note {{ margin-top: 6px; }}
+
   .footer {{ text-align: center; color: #aaa; font-size: 0.78em; margin-top: 20px; }}
 </style>
 </head>
@@ -424,14 +473,15 @@ def generate_savings_summary(db_path, output_dir, export_rate_p=12.0, log_fn=Non
 
   <div class="header">
     <h1>Solar Savings Summary</h1>
-    <p>Generated {generated_at} &nbsp;&bull;&nbsp; Export tariff: Octopus Outgoing {export_rate_p:.0f}p
-       &nbsp;&bull;&nbsp; Savings calculated against actual Octopus Tracker rates</p>
+    <p>Generated {generated_at} &nbsp;&bull;&nbsp; Export tariff: {export_label}
+       &nbsp;&bull;&nbsp; Savings calculated against the prices you actually paid: {tariff_label}</p>
   </div>
 
   <div class="subtitle">
     <strong>How this is calculated:</strong> &ldquo;Without solar&rdquo; assumes all home
-    consumption would have been purchased from the grid at your actual Tracker rate.
-    Savings = avoided import cost + export revenue.
+    consumption would have been purchased from the grid at the price you actually paid
+    for each half-hour. Savings = avoided import cost + export revenue.
+    {tariff_note_html}
   </div>
 
   <div class="grid">

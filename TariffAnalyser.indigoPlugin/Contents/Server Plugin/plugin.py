@@ -5,8 +5,32 @@
 #              half-hourly energy data from SigenEnergyManager.
 #              Outputs HTML reports that open in the default browser.
 # Author:      CliveS & Claude Opus 5.5
-# Date:        23-09-2026
-# Version:     1.9.5
+# Date:        27-09-2026
+# Version:     1.10
+#
+# v1.10 (27-09-2026): the faults found while writing the plain-English guide.
+# * Region menu: K-P named after the wrong areas (K is South Wales, L South West
+#   England, M Yorkshire, N South Scotland, P North Scotland).
+# * "Open report in LibreOffice" checkbox relabelled - it opens the browser.
+# * Tariff Comparison dialog no longer lists Flexible, Intelligent Go and
+#   Intelligent Flux, which were never compared.
+# * The Generate Tariff Comparison Report action now fetches Agile prices when
+#   the stored ones do not cover its period, as the menu item did; a failed
+#   fetch is a WARNING and the report goes ahead. The menu item now skips the
+#   network when the prices are already there (octopus_prices.missing_days).
+# * Energy Summary header names the chosen export tariff and its real price
+#   (SEG minimum 1.63p showed as "Octopus Outgoing 2p").
+# * The recorded-prices row is named from the data (tariff_engine.
+#   recorded_tariff_label) plus SigenEnergyManager's Tariff Monitor, not a fixed
+#   "Octopus Tracker (actual)" - since 17-09-2026 that column holds Flux prices
+#   on the author's house. A period that spans a tariff change says so.
+# * Nightly collection: the solar install date (13-03-2026) and Tracker product
+#   (SILVER-25-04-11) were fixed for one house. Both are optional settings now,
+#   blank = no install-date cut-off / the recorded prices. Region from the
+#   region setting as before. The dead Sigenergy-file importer lost its default
+#   path, which was one house's own file.
+# * IndigoSecrets.py read per key: a file missing any one Octopus line used to
+#   be ignored entirely.
 #
 # v1.9.5 (23-09-2026): NO SERVER CALL AT IMPORT. The default SigenEnergyManager
 # DB path was built at MODULE level from indigo.server.getInstallFolderPath().
@@ -133,22 +157,32 @@ except ImportError:
     install_timestamp_filter = None
 
 sys.path.insert(0, "/Library/Application Support/Perceptive Automation")
+# Per key (house rule): a missing single key must not blank the others. Until
+# v1.10 one grouped import of all seven names meant a file lacking any one of
+# them was ignored entirely and every value fell back to PluginConfig.
 try:
-    from IndigoSecrets import (
-        OCTOPUS_API_KEY        as _OCTOPUS_API_KEY,
-        OCTOPUS_MPAN           as _OCTOPUS_MPAN,
-        OCTOPUS_SERIAL         as _OCTOPUS_SERIAL,
-        OCTOPUS_EXPORT_MPAN    as _OCTOPUS_EXPORT_MPAN,
-        OCTOPUS_EXPORT_SERIAL  as _OCTOPUS_EXPORT_SERIAL,
-        OCTOPUS_GAS_MPRN       as _OCTOPUS_GAS_MPRN,
-        OCTOPUS_GAS_SERIAL     as _OCTOPUS_GAS_SERIAL,
-    )
+    import IndigoSecrets as _secrets_mod
     _SECRETS_LOADED = True
 except ImportError:
-    _OCTOPUS_API_KEY = _OCTOPUS_MPAN = _OCTOPUS_SERIAL = ""
-    _OCTOPUS_EXPORT_MPAN = _OCTOPUS_EXPORT_SERIAL = ""
-    _OCTOPUS_GAS_MPRN = _OCTOPUS_GAS_SERIAL = ""
+    _secrets_mod = None
     _SECRETS_LOADED = False
+
+
+def _secret(name):
+    """One IndigoSecrets value as a stripped string, "" when absent."""
+    if _secrets_mod is None:
+        return ""
+    value = getattr(_secrets_mod, name, "")
+    return str(value).strip() if value else ""
+
+
+_OCTOPUS_API_KEY       = _secret("OCTOPUS_API_KEY")
+_OCTOPUS_MPAN          = _secret("OCTOPUS_MPAN")
+_OCTOPUS_SERIAL        = _secret("OCTOPUS_SERIAL")
+_OCTOPUS_EXPORT_MPAN   = _secret("OCTOPUS_EXPORT_MPAN")
+_OCTOPUS_EXPORT_SERIAL = _secret("OCTOPUS_EXPORT_SERIAL")
+_OCTOPUS_GAS_MPRN      = _secret("OCTOPUS_GAS_MPRN")
+_OCTOPUS_GAS_SERIAL    = _secret("OCTOPUS_GAS_SERIAL")
 
 import tariff_engine
 import octopus_prices
@@ -177,7 +211,8 @@ OUTPUT_DIR = os.path.join(_PA_SHARED, "TariffAnalyser")
 SIGEN_PLUGIN_ID = "com.clives.indigoplugin.sigenergy-energy-manager"
 SIGEN_DB_NAME   = "energy_timeseries.db"
 
-# Octopus region for North East England (Medomsley, County Durham)
+# Octopus region used until the user picks one (F = North East England; matches
+# the defaultValue of the octopusRegion menu in PluginConfig.xml)
 DEFAULT_REGION = "F"
 
 
@@ -261,6 +296,26 @@ class Plugin(indigo.PluginBase):
                 log(f"[DailySummary] Concurrent thread error: {exc}", level="ERROR")
             self.sleep(60)
 
+    def validatePrefsConfigUi(self, valuesDict):
+        """Refuse an install date or Tracker product code the collection could
+        not use, rather than saving it and ignoring it every night."""
+        errors = indigo.Dict()
+        try:
+            daily_collector.parse_install_date(valuesDict.get("solarInstallDate", ""))
+        except ValueError:
+            errors["solarInstallDate"] = ("Enter the date as YYYY-MM-DD, such as "
+                                          "2026-03-13, or leave it blank.")
+        try:
+            product = daily_collector.normalise_tracker_product(
+                valuesDict.get("trackerProduct", ""))
+            valuesDict["trackerProduct"] = product
+        except ValueError:
+            errors["trackerProduct"] = ("Enter a Tracker product code such as "
+                                        "SILVER-25-04-11, or leave it blank.")
+        if errors:
+            return False, valuesDict, errors
+        return True, valuesDict
+
     # ================================================================
     # Plugin prefs helpers
     # ================================================================
@@ -334,6 +389,51 @@ class Plugin(indigo.PluginBase):
         rate = tariff.get("rate_p")
         return float(rate) if rate is not None else 12.0
 
+    def _export_label(self):
+        """Energy Summary header text: the export tariff's real name and the
+        flat price the summary uses for it."""
+        tariff = tariff_engine.EXPORT_TARIFFS.get(self._export_tariff_key(), {})
+        name   = tariff.get("name", self._export_tariff_key())
+        return report_generator.export_tariff_label(
+            name, self._export_rate_flat_p(),
+            flat_rate_known=tariff.get("rate_p") is not None)
+
+    def _current_tariff_name(self):
+        """The tariff SigenEnergyManager's Tariff Monitor says is active now
+        (e.g. "Octopus Flux"), or "" if there is no such device or no answer.
+        Used only to name the recorded-prices row; the data decides whether the
+        name fits (tariff_engine.recorded_tariff_label)."""
+        try:
+            for dev in indigo.devices.iter(SIGEN_PLUGIN_ID):
+                if dev.deviceTypeId == "tariffMonitor":
+                    return tariff_engine.clean_tariff_name(
+                        dev.states.get("tariffActive", ""))
+        except Exception as exc:
+            self.logger.debug(f"Could not read the Tariff Monitor device: {exc}")
+        return ""
+
+    def _solar_install_date(self):
+        """The optional solar install date setting, or None (blank or not a
+        date — a bad value is refused by the dialog, so only a hand-edited
+        pref reaches the warning)."""
+        raw = self.pluginPrefs.get("solarInstallDate", "")
+        try:
+            return daily_collector.parse_install_date(raw)
+        except ValueError:
+            log(f"Solar install date '{raw}' is not a YYYY-MM-DD date - ignored, "
+                f"so every day with solar data counts.", level="WARNING")
+            return None
+
+    def _tracker_product(self):
+        raw = self.pluginPrefs.get("trackerProduct", "")
+        try:
+            return daily_collector.normalise_tracker_product(raw)
+        except ValueError:
+            log(f"Tracker product code '{raw}' is not a product code - ignored, "
+                f"so the collection uses the prices SigenEnergyManager recorded.",
+                level="WARNING")
+            return ""
+
     def _gas_unit_rate(self):
         try:
             return float(self.pluginPrefs.get("gasUnitRateP", "6.09"))
@@ -356,6 +456,8 @@ class Plugin(indigo.PluginBase):
             "region":          self._region(),
             "gas_unit_rate_p": self._gas_unit_rate(),
             "timeseries_db":   self._default_db_path(),
+            "tracker_product":    self._tracker_product(),
+            "solar_install_date": self._solar_install_date(),
         }
 
     def _have_octopus_creds(self):
@@ -445,6 +547,7 @@ class Plugin(indigo.PluginBase):
             date_from          = date_from,
             date_to            = date_to,
             export_tariff_key  = self._export_tariff_key(),
+            current_tariff_name = self._current_tariff_name(),
         )
         if comparison.get("slots", 0) == 0:
             errors["lookbackDays"] = (
@@ -473,17 +576,31 @@ class Plugin(indigo.PluginBase):
     # ================================================================
 
     def _ensure_agile_prices(self, date_from, date_to):
-        """Silently fetch any missing Agile price slots for the date range."""
+        """Fetch Agile prices for the period when the stored ones do not cover
+        it. Used before every comparison, from the menu and the action. A
+        failure is logged and the report goes ahead with the prices it has."""
         agile_db = self._agile_db_path()
         if not agile_db:
             return   # install folder unknown — already warned
+        region = self._region()
+        try:
+            missing = octopus_prices.missing_days(agile_db, region, date_from, date_to)
+        except Exception as exc:
+            log(f"[Prices] Could not check the stored Agile prices: {exc}", level="WARNING")
+            missing = 1
+        if not missing:
+            self.logger.debug(f"[Prices] Agile prices already cover {date_from} to {date_to}")
+            return
+        log(f"[Prices] Stored Agile prices are missing {missing} day(s) of "
+            f"{date_from} to {date_to} - fetching them")
         try:
             octopus_prices.fetch_agile_prices(
-                agile_db, self._region(),
+                agile_db, region,
                 date_from, date_to, log_fn=log,
             )
         except Exception as exc:
-            log(f"[Prices] Background fetch failed: {exc}", level="WARNING")
+            log(f"[Prices] Could not fetch Agile prices ({exc}). The report uses "
+                f"the prices already stored.", level="WARNING")
 
     def updatePriceData(self, valuesDict=None, typeId=None):
         days = self._default_days()
@@ -522,9 +639,14 @@ class Plugin(indigo.PluginBase):
             return
 
         log("[Savings] Generating savings summary...")
+        today = date.today()
+        tariff_label, tariff_note = tariff_engine.recorded_tariff_for_period(
+            db_path, today.replace(month=1, day=1), today, self._current_tariff_name())
         path, err = report_generator.generate_savings_summary(
             db_path, self._output_dir(),
             export_rate_p=self._export_rate_flat_p(), log_fn=log,
+            export_label=self._export_label(),
+            tariff_label=tariff_label, tariff_note=tariff_note,
         )
         if err:
             log(f"[Savings] Failed: {err}", level="ERROR")
@@ -612,6 +734,10 @@ class Plugin(indigo.PluginBase):
             return
 
         log(f"[Action] Generating report: last {days} days ({date_from} to {date_to})")
+        # Same as the menu item: top up the Agile prices first, or a scheduled
+        # report showed Agile as "insufficient price data" whenever nothing had
+        # fetched them (nothing does so nightly).
+        self._ensure_agile_prices(date_from, date_to)
         comparison = tariff_engine.run_comparison(
             timeseries_db_path = db_path,
             agile_db_path      = self._agile_db_path(),
@@ -619,6 +745,7 @@ class Plugin(indigo.PluginBase):
             date_from          = date_from,
             date_to            = date_to,
             export_tariff_key  = self._export_tariff_key(),
+            current_tariff_name = self._current_tariff_name(),
         )
 
         if comparison.get("slots", 0) == 0:
@@ -679,7 +806,7 @@ class Plugin(indigo.PluginBase):
         log(f"[Compare] Import: {totals.get('grid_import_kwh', 0):.1f} kWh  "
             f"Export: {totals.get('grid_export_kwh', 0):.1f} kWh  "
             f"PV: {totals.get('pv_kwh', 0):.1f} kWh")
-        log(f"[Compare] {'Tariff':<35} {'Cost':>8}  {'vs Tracker':>12}  {'Cover':>6}")
+        log(f"[Compare] {'Tariff':<35} {'Cost':>8}  {'vs actual':>12}  {'Cover':>6}")
         log(f"[Compare] {'-'*65}")
         for r in ranked:
             total_gbp  = r["total_cost_p"] / 100.0

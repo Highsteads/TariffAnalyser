@@ -74,6 +74,18 @@ def fetch_agile_prices(db_path, region, date_from, date_to, log_fn=None):
     return imp_count, exp_count
 
 
+def missing_days(db_path, region, date_from, date_to):
+    """Number of days in date_from..date_to whose stored Agile import or export
+    prices are short (the same test fetch_agile_prices uses to decide what to
+    fetch). 0 means the stored prices already cover the period."""
+    days = set()
+    for direction in ("import", "export"):
+        existing = _existing_slots(db_path, region, direction)
+        for period_from, _period_to in _build_periods(date_from, date_to, existing):
+            days.add(period_from)
+    return len(days)
+
+
 def get_coverage(db_path, region):
     """Return (earliest_import, latest_import, earliest_export, latest_export)."""
     if not os.path.exists(db_path):

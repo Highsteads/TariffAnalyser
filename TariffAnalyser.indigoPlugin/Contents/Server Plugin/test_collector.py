@@ -117,5 +117,94 @@ class TestBuildPeriods(unittest.TestCase):
         self.assertEqual(len(periods), 1)
 
 
+# ---------------------------------------------------------------------------
+# v1.10 — Tracker product and install date are settings, not one house's values
+# ---------------------------------------------------------------------------
+
+class TestTrackerProductSetting(unittest.TestCase):
+
+    def test_normalise(self):
+        self.assertEqual(dc.normalise_tracker_product(""), "")
+        self.assertEqual(dc.normalise_tracker_product(None), "")
+        self.assertEqual(dc.normalise_tracker_product(" silver-25-04-11 "), "SILVER-25-04-11")
+        self.assertEqual(dc.normalise_tracker_product("E-1R-SILVER-25-04-11-K"), "SILVER-25-04-11")
+        with self.assertRaises(ValueError):
+            dc.normalise_tracker_product("not a code!")
+
+    def test_blank_product_makes_no_api_call(self):
+        calls = []
+        saved = dc._api_get
+        dc._api_get = lambda *a, **k: calls.append(a) or {"results": []}
+        try:
+            rates = dc._fetch_tracker_rates(date(2026, 9, 1), date(2026, 9, 2), "F", "",
+                                            lambda *a, **k: None)
+        finally:
+            dc._api_get = saved
+        self.assertEqual(rates, {})
+        self.assertEqual(calls, [])
+
+    def test_product_and_region_build_the_tariff_code(self):
+        urls = []
+        saved = dc._api_get
+        dc._api_get = lambda url, **k: urls.append(url) or {"results": []}
+        try:
+            dc._fetch_tracker_rates(date(2026, 9, 1), date(2026, 9, 2), "K",
+                                    "SILVER-25-04-11", lambda *a, **k: None)
+        finally:
+            dc._api_get = saved
+        self.assertEqual(len(urls), 1)
+        self.assertIn("/products/SILVER-25-04-11/electricity-tariffs/"
+                      "E-1R-SILVER-25-04-11-K/", urls[0])
+
+
+class TestInstallDateSetting(unittest.TestCase):
+
+    def test_parse(self):
+        self.assertIsNone(dc.parse_install_date(""))
+        self.assertEqual(dc.parse_install_date("2026-03-13"), date(2026, 3, 13))
+        self.assertEqual(dc.parse_install_date("13/03/2026"), date(2026, 3, 13))
+        with self.assertRaises(ValueError):
+            dc.parse_install_date("March")
+
+    def _savings(self, install_date):
+        import tempfile
+        import sqlite3
+        ds = "2026-02-01"
+        stubs = {
+            "_fetch_tracker_rates":       lambda *a, **k: {ds: 20.0},
+            "_fetch_flux_rates":          lambda *a, **k: {},
+            "_fetch_octopus_consumption": lambda *a, **k: {},
+            "_fetch_octopus_gas":         lambda *a, **k: {},
+            "_aggregate_halfhourly":      lambda *a, **k: {ds: {
+                "pv_kwh": 8.0, "home_kwh": 10.0, "imp_kwh": 2.0, "exp_kwh": 0.0,
+                "bat_chg": 0.0, "bat_dis": 0.0, "tracker_avg_p": 20.0}},
+        }
+        saved = {k: getattr(dc, k) for k in stubs}
+        for k, v in stubs.items():
+            setattr(dc, k, v)
+        tmp = tempfile.mkdtemp()
+        try:
+            db = os.path.join(tmp, "ts.db")
+            dc.update_daily_summary(db, date(2026, 2, 1), date(2026, 2, 1),
+                                    {"region": "F", "solar_install_date": install_date})
+            con = sqlite3.connect(db)
+            row = con.execute("SELECT savings_vs_no_solar_gbp FROM daily_summary").fetchone()
+            con.close()
+            return row[0]
+        finally:
+            for k, v in saved.items():
+                setattr(dc, k, v)
+            import shutil
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_no_install_date_counts_every_solar_day(self):
+        # 8 kWh from solar at 20p = £1.60. Before v1.10 a fixed 13 March 2026
+        # install date zeroed every earlier day for every user.
+        self.assertAlmostEqual(self._savings(None), 1.60, places=4)
+
+    def test_install_date_after_the_day_zeroes_its_savings(self):
+        self.assertEqual(self._savings(date(2026, 3, 13)), 0.0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -273,5 +273,96 @@ class TestLoaders(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+# ---------------------------------------------------------------------------
+# v1.10 — the recorded-prices row is named from the data, not "Tracker"
+# ---------------------------------------------------------------------------
+
+def _flat_day(day, price=24.0):
+    return [(f"{day}T{h:02d}:{m:02d}:00", 1.0, 0.0, 0.0, 1.0, price)
+            for h in range(24) for m in (0, 30)]
+
+
+def _flux_day(day):
+    out = []
+    for h in range(24):
+        for m in (0, 30):
+            if 2 <= h < 5:
+                p = 14.6184
+            elif 16 <= h < 19:
+                p = 34.0999
+            else:
+                p = 24.3543
+            out.append((f"{day}T{h:02d}:{m:02d}:00", 1.0, 0.0, 0.0, 1.0, p))
+    return out
+
+
+def _prices(rows):
+    return te._day_price_counts([(r[0], None, r[1], r[2], r[3], r[4], 0, 0, 0, r[5], "")
+                                 for r in rows])
+
+
+class TestRecordedTariffLabel(unittest.TestCase):
+
+    def test_flat_prices_named_tracker(self):
+        label, note = te.recorded_tariff_label(_prices(_flat_day("2026-08-01")), "Octopus Tracker")
+        self.assertEqual(label, "Octopus Tracker (actual)")
+        self.assertEqual(note, "")
+
+    def test_flux_bands_named_flux_not_tracker(self):
+        label, note = te.recorded_tariff_label(_prices(_flux_day("2026-09-20")), "Octopus Flux")
+        self.assertEqual(label, "Octopus Flux (actual)")
+        self.assertNotIn("Tracker", label)
+
+    def test_name_that_does_not_fit_the_data_is_not_used(self):
+        # Flat Tracker-shaped prices while the monitor now says Flux: the
+        # period predates the switch, so "Flux" would be wrong.
+        label, _ = te.recorded_tariff_label(_prices(_flat_day("2026-08-01")), "Octopus Flux")
+        self.assertEqual(label, te.GENERIC_RECORDED_NAME)
+
+    def test_tariff_change_in_period_is_mixed_with_a_note(self):
+        rows = _flat_day("2026-09-16") + _flat_day("2026-09-17", 25.0) + _flux_day("2026-09-18")
+        label, note = te.recorded_tariff_label(_prices(rows), "Octopus Flux")
+        self.assertNotIn("Tracker", label)
+        self.assertIn("mixed", label)
+        self.assertIn("one price a day to 17 Sep", note)
+        self.assertIn("time-of-use bands (Octopus Flux) from 18 Sep", note)
+        self.assertNotIn(";", note)
+
+    def test_midnight_straggler_still_a_flat_day(self):
+        rows = _flat_day("2026-09-06", 22.617)
+        rows[0] = rows[0][:5] + (19.005,)      # yesterday's price in the first slot
+        self.assertEqual(te._day_pattern(_prices(rows)["2026-09-06"]), "flat")
+
+    def test_go_two_bands_is_time_of_use(self):
+        rows = [(f"2026-09-01T{h:02d}:{m:02d}:00", 1.0, 0.0, 0.0, 1.0,
+                 7.5 if 1 <= h < 5 else 24.0) for h in range(24) for m in (0, 30)]
+        self.assertEqual(te._day_pattern(_prices(rows)["2026-09-01"]), "tou")
+
+    def test_partial_day_is_not_classified(self):
+        rows = _flux_day("2026-09-18") + _flat_day("2026-09-19")[:20]
+        label, note = te.recorded_tariff_label(_prices(rows), "Octopus Flux")
+        self.assertEqual(label, "Octopus Flux (actual)")
+        self.assertEqual(note, "")
+
+    def test_clean_tariff_name(self):
+        self.assertEqual(te.clean_tariff_name("Octopus Flux (forced)"), "Octopus Flux")
+        self.assertEqual(te.clean_tariff_name("Initialising"), "")
+        self.assertEqual(te.clean_tariff_name(None), "")
+
+    def test_run_comparison_names_the_row_from_the_data(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            ts = _make_timeseries(tmp, _flux_day("2026-09-20") + _flux_day("2026-09-21"))
+            comp = te.run_comparison(ts, os.path.join(tmp, "none.db"), "F",
+                                     date(2026, 9, 20), date(2026, 9, 21),
+                                     import_tariff_keys=["tracker", "go"],
+                                     current_tariff_name="Octopus Flux")
+            row = next(r for r in comp["results"] if r["tariff_key"] == "tracker")
+            self.assertEqual(row["tariff_name"], "Octopus Flux (actual)")
+            self.assertEqual(comp["recorded_tariff_label"], "Octopus Flux (actual)")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
