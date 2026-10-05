@@ -5,8 +5,31 @@
 #              half-hourly energy data from SigenEnergyManager.
 #              Outputs HTML reports that open in the default browser.
 # Author:      CliveS & Claude Opus 5.5
-# Date:        27-09-2026
-# Version:     1.11
+# Date:        05-10-2026
+# Version:     1.12
+#
+# v1.12 (05-10-2026): OCTOPUS'S REAL PRICES, REAL EXPORT, PRICING BY OVERLAP.
+# * Flux, Go, Cosy and Economy 7 (now Octopus Flexible on a two-rate meter)
+#   use Octopus's published unit prices for the region, per day
+#   (octopus_prices.unit_rates, saved in agile_prices.db, fetched at most
+#   daily, found by exact display name). The table (Flux was 7.01/21/33p) is
+#   now the fallback only, Octopus region F on 05-10-2026, and the report says
+#   when it was used. Cosy gains its 22:00-00:00 cheap window.
+# * Export: Flux Export added (fetched, banded) and always paired with Flux;
+#   the actual row uses the export price recorded per day in daily_history.json
+#   (12p to 16-09-2026, Flux Export after), else the setting. SEG choices
+#   renamed illustrative (Ofgem sets no floor). Unknown export key -> Outgoing.
+# * TA-01: every row priced by OVERLAP with the price periods, kWh split in
+#   proportion to time (tariff_engine.RateBook / PriceTimeline). Agile was
+#   always "insufficient data" (1 in 7210 slot starts aligned); a missing
+#   Agile Outgoing price is now missing, not 0p.
+# * TA-02: a recorded 0p price is kept (was `or 24.5`).
+# * TA-R1: savings track battery provenance (solar vs grid part, drawn in
+#   proportion, rescaled to SoC); grid-charged energy is time-shifting, and
+#   total saved = would have paid - paid.
+# * Nightly collection: Go/Flux at Octopus's prices per meter half-hour, Flux
+#   net of Flux Export, actual export at the recorded price per day.
+# * get_coverage: MIN/MAX as separate subqueries (no full scan).
 #
 # v1.11 (27-09-2026): STANDING CHARGES FROM THE REAL FIGURES.
 # * The recorded-prices row paid a fixed Tracker 61.64p a day. It now uses the
@@ -401,12 +424,14 @@ class Plugin(indigo.PluginBase):
             return 30
 
     def _export_tariff_key(self):
-        return self.pluginPrefs.get("exportTariffKey", "outgoing_12p")
+        key = self.pluginPrefs.get("exportTariffKey", "outgoing_12p")
+        return key if key in tariff_engine.EXPORT_TARIFFS else "outgoing_12p"
 
     def _export_rate_flat_p(self):
-        """Flat export rate (p/kWh) for the configured export tariff, for the
-        savings summary. Agile Outgoing has no single flat rate, so fall back
-        to Octopus Outgoing 12p."""
+        """Flat export rate (p/kWh) for the configured export tariff, used by
+        the savings summary on a day with no recorded export price. Agile
+        Outgoing and Flux Export have no single flat rate, so fall back to
+        Octopus Outgoing 12p."""
         tariff = tariff_engine.EXPORT_TARIFFS.get(self._export_tariff_key(), {})
         rate = tariff.get("rate_p")
         return float(rate) if rate is not None else 12.0
@@ -515,6 +540,7 @@ class Plugin(indigo.PluginBase):
             daily_collector.init_daily_summary_db(db_path)
             config = self._build_octopus_config()
             config["live_standing"] = self._live_standing(date_from, date_to)
+            config["live_rates"]    = self._live_rates(date_from, date_to)
             daily_collector.update_daily_summary(
                 db_path, date_from, date_to, config, log_fn=log,
             )
@@ -571,6 +597,7 @@ class Plugin(indigo.PluginBase):
             export_tariff_key  = self._export_tariff_key(),
             current_tariff_name = self._current_tariff_name(),
             live_standing      = self._live_standing(date_from, date_to),
+            live_rates         = self._live_rates(date_from, date_to),
         )
         if comparison.get("slots", 0) == 0:
             errors["lookbackDays"] = (
@@ -641,13 +668,34 @@ class Plugin(indigo.PluginBase):
         if tracker:
             products[tariff_engine.TRACKER_LIVE_KEY] = tracker
             names[tariff_engine.TRACKER_LIVE_KEY] = "Octopus Tracker"
+        two_rate = {key for key, t in tariff_engine.IMPORT_TARIFFS.items()
+                    if t.get("octopus_name") and t.get("two_rate")}
         try:
             return octopus_prices.standing_charges_by_day(
                 agile_db, self._region(), date_from, date_to,
-                names=names, products=products, log_fn=log)
+                names=names, products=products, log_fn=log, two_rate=two_rate)
         except Exception as exc:
             log(f"[Standing] Could not read Octopus's standing charges ({exc}). "
                 f"The plugin's own figures are used.", level="WARNING")
+            return {}
+
+    def _live_rates(self, date_from, date_to):
+        """Octopus's published unit prices for Go, Cosy, Flux, Economy 7 and
+        Flux Export for the region setting, for each half-hour of the period
+        (v1.12). Saved beside the Agile prices and fetched again at most once
+        a day. {} when none is available; any tariff or half-hour missing
+        from the answer uses the plugin's own figures, and the report says
+        so."""
+        agile_db = self._agile_db_path()
+        if not agile_db:
+            return {}   # install folder unknown — already warned
+        try:
+            return octopus_prices.unit_rates(
+                agile_db, self._region(), date_from, date_to,
+                specs=tariff_engine.live_rate_specs(), log_fn=log)
+        except Exception as exc:
+            log(f"[Rates] Could not read Octopus's unit prices ({exc}). The plugin's "
+                f"own figures are used.", level="WARNING")
             return {}
 
     def updatePriceData(self, valuesDict=None, typeId=None):
@@ -795,6 +843,7 @@ class Plugin(indigo.PluginBase):
             export_tariff_key  = self._export_tariff_key(),
             current_tariff_name = self._current_tariff_name(),
             live_standing      = self._live_standing(date_from, date_to),
+            live_rates         = self._live_rates(date_from, date_to),
         )
 
         if comparison.get("slots", 0) == 0:

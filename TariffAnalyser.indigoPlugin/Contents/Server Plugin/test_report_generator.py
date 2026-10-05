@@ -34,10 +34,10 @@ class TestFormatPence(unittest.TestCase):
     def test_export_label(self):
         seg = te.EXPORT_TARIFFS["seg_min"]
         self.assertEqual(rg.export_tariff_label(seg["name"], seg["rate_p"]),
-                         "SEG Minimum (Ofgem floor) at 1.63p")
+                         "SEG low rate (illustrative 1.63p)")
         out = te.EXPORT_TARIFFS["outgoing_12p"]
         self.assertEqual(rg.export_tariff_label(out["name"], out["rate_p"]),
-                         "Octopus Outgoing 12p (actual)")
+                         "Octopus Outgoing 12p")
         agile = rg.export_tariff_label("Octopus Agile Outgoing", 12.0, flat_rate_known=False)
         self.assertIn("Octopus Agile Outgoing", agile)
         self.assertIn("12p", agile)
@@ -62,7 +62,7 @@ class TestSavingsSummaryHeader(unittest.TestCase):
         seg = te.EXPORT_TARIFFS["seg_min"]
         html = self._html(export_rate_p=seg["rate_p"],
                           export_label=rg.export_tariff_label(seg["name"], seg["rate_p"]))
-        self.assertIn("Export tariff: SEG Minimum (Ofgem floor) at 1.63p", html)
+        self.assertIn("SEG low rate (illustrative 1.63p) on any day without one", html)
         self.assertNotIn("Octopus Outgoing", html)
         self.assertNotIn("Outgoing 2p", html)
 

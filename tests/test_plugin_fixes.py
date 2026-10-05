@@ -175,7 +175,7 @@ def test_action_fetch_failure_is_logged_and_the_report_still_made(env, monkeypat
 def test_export_label_names_the_chosen_tariff_and_its_real_price(env):
     _stub_, _secrets, tmp = env
     _mod, p = _plugin(tmp, exportTariffKey="seg_min")
-    assert p._export_label() == "SEG Minimum (Ofgem floor) at 1.63p"
+    assert p._export_label() == "SEG low rate (illustrative 1.63p)"
     p.pluginPrefs["exportTariffKey"] = "agile_outgoing"
     label = p._export_label()
     assert label.startswith("Octopus Agile Outgoing") and "12p" in label
@@ -249,8 +249,8 @@ def test_action_passes_octopus_standing_charges_to_the_comparison(env, monkeypat
     monkeypatch.setattr(mod.octopus_prices, "missing_days", lambda *a: 0)
     asked = {}
 
-    def fake(db, region, a, b, names=None, products=None, log_fn=None):
-        asked.update(region=region, names=names, products=products)
+    def fake(db, region, a, b, names=None, products=None, log_fn=None, two_rate=()):
+        asked.update(region=region, names=names, products=products, two_rate=two_rate)
         return {"go": {"2026-09-20": 63.2}}
     monkeypatch.setattr(mod.octopus_prices, "standing_charges_by_day", fake)
     seen = {}
@@ -260,9 +260,62 @@ def test_action_passes_octopus_standing_charges_to_the_comparison(env, monkeypat
     assert seen["live_standing"] == {"go": {"2026-09-20": 63.2}}
     assert asked["region"] == "K"
     assert asked["names"]["go"] == "Octopus Go"
-    assert set(asked["names"]) == {"go", "agile", "cosy", "flux",
+    assert set(asked["names"]) == {"go", "agile", "cosy", "flux", "economy7",
                                    mod.tariff_engine.TRACKER_LIVE_KEY}
+    assert asked["two_rate"] == {"economy7"}
     assert asked["products"] == {mod.tariff_engine.TRACKER_LIVE_KEY: "SILVER-25-04-11"}
+
+
+# --- v1.12: Octopus unit prices reach the comparison and the collection --------
+
+def test_action_passes_octopus_unit_prices_to_the_comparison(env, monkeypatch):
+    stub, _secrets, tmp = env
+    mod, p = _plugin(tmp, octopusRegion="K")
+    _action_setup(monkeypatch, mod, p, tmp)
+    monkeypatch.setattr(mod.octopus_prices, "missing_days", lambda *a: 0)
+    monkeypatch.setattr(mod.octopus_prices, "standing_charges_by_day", lambda *a, **k: {})
+    asked = {}
+    rates = {"flux": {"standard": [(0, None, 23.19)]}}
+
+    def fake(db, region, a, b, specs=None, log_fn=None):
+        asked.update(region=region, specs=specs)
+        return rates
+    monkeypatch.setattr(mod.octopus_prices, "unit_rates", fake)
+    seen = {}
+    monkeypatch.setattr(mod.tariff_engine, "run_comparison",
+                        lambda **kw: seen.update(kw) or {"slots": 0})
+    p.actionGenerateReport(_Action({"reportDays": "7"}))
+    assert seen["live_rates"] == rates
+    assert asked["region"] == "K"
+    assert asked["specs"]["flux"]["octopus_name"] == "Octopus Flux Import"
+    assert asked["specs"]["flux_export"]["direction"] == "EXPORT"
+    assert asked["specs"]["economy7"]["two_rate"] is True
+    assert set(asked["specs"]) == {"go", "cosy", "flux", "economy7", "flux_export"}
+
+
+def test_unit_price_failure_is_a_warning_and_the_table_stands(env, monkeypatch):
+    stub, _secrets, tmp = env
+    mod, p = _plugin(tmp)
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(mod.octopus_prices, "unit_rates", boom)
+    assert p._live_rates(date(2026, 9, 1), date(2026, 9, 2)) == {}
+    assert any("disk full" in w for w in _warnings(stub))
+
+
+def test_unknown_export_setting_falls_back_to_outgoing(env):
+    _stub_, _secrets, tmp = env
+    _mod, p = _plugin(tmp, exportTariffKey="outgoing_15p_gone")
+    assert p._export_tariff_key() == "outgoing_12p"
+
+
+def test_export_menu_offers_flux_export_and_no_ofgem_floor():
+    tree = ET.parse(os.path.join(SERVER_PLUGIN, "PluginConfig.xml"))
+    field = next(f for f in tree.iter("Field") if f.get("id") == "exportTariffKey")
+    options = {o.get("value"): o.text for o in field.iter("Option")}
+    assert "flux_export" in options
+    assert all("floor" not in t.lower() for t in options.values())
 
 
 def test_standing_charge_failure_is_a_warning_and_the_table_figures_stand(env, monkeypatch):

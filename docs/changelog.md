@@ -7,6 +7,21 @@ nav_order: 10
 
 The newest version is at the top.
 
+## 1.12 — 5 October 2026
+
+The prices in the comparison are now Octopus's own, and the Energy Summary keeps solar and grid-charged battery energy apart.
+
+- Octopus Flux, Go and Cosy used prices typed into the plugin in May. Flux's cheap rate was 7.01p against a real 13.92p, so Flux looked far cheaper than it is. Each now uses the prices Octopus published for your region, as they stood on each day, fetched no more than once a day for a period already held. If Octopus cannot be reached the Event Log says so, the plugin uses its own figures, now Octopus's prices for North East England on 5 October 2026, and the report says which tariff and how much of the period that covered.
+- Cosy was missing its third cheap window, from 10pm to midnight.
+- Economy 7 is now Octopus's Flexible tariff on a two-rate meter, at Octopus's day and night prices for your region, with the night rate from 12:30am to 7:30am. It used typical prices of 15p and 30p.
+- Every tariff was paid 12p for export. Flux is now paid at Octopus Flux Export prices, because Octopus sells the two only as a pair, and your own row is paid at the export price SigenEnergyManager recorded for each day, so the days on Outgoing count at 12p and the days on Flux Export at what you really earned. Octopus Flux Export is also a new choice for the export setting.
+- The two Smart Export Guarantee choices are now called illustrative rates. Ofgem sets no minimum export price, so calling 1.63p "the Ofgem floor" was wrong.
+- Agile always showed as short of prices, because the plugin looked its prices up by the exact start of each half-hour and SigenEnergyManager's half-hours start a few minutes either side. Each half-hour is now split between the prices it spans, in proportion to time, for every tariff, so a half-hour that starts at 3:56pm on Flux is mostly charged at the peak rate rather than all at the day rate. A missing Agile export price now leaves that half-hour out instead of counting it at 0p.
+- A price recorded as 0p was treated as missing and replaced with 24.5p. It is now kept.
+- The Energy Summary counted every unit the battery gave the house as solar, including the energy it had charged from the grid at night. It now keeps track of how much of the battery is solar and how much is grid, and shows the saving from the grid part separately as time-shifting. The total saved is now exactly what you would have paid minus what you did pay.
+- The nightly collection prices Go and Flux at Octopus's prices for each half-hour, and your export at the price recorded for each day, instead of today's Flux prices and 12p for every day.
+- A check on the saved Agile prices no longer reads the whole table.
+
 ## 1.11 — 27 September 2026
 
 The standing charges in the comparison are now the real ones.

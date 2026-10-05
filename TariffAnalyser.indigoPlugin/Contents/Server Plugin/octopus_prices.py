@@ -4,9 +4,9 @@
 # Description: Fetches and caches Octopus Agile half-hourly import/export
 #              prices from the public Octopus Energy REST API.
 #              No authentication required.
-# Author:      CliveS & Claude Sonnet 4.6
-# Date:        02-05-2026
-# Version:     1.0
+# Author:      CliveS & Claude Opus 5.5
+# Date:        05-10-2026
+# Version:     1.1
 
 import json
 import os
@@ -38,6 +38,24 @@ def init_agile_db(db_path):
             region      TEXT NOT NULL,
             price_p     REAL NOT NULL,
             PRIMARY KEY (slot_start, region)
+        );
+        CREATE TABLE IF NOT EXISTS unit_rates (
+            tariff_key  TEXT    NOT NULL,
+            region      TEXT    NOT NULL,
+            register    TEXT    NOT NULL,   -- standard, day or night
+            product     TEXT    NOT NULL,
+            valid_from  INTEGER NOT NULL,   -- epoch seconds
+            valid_to    INTEGER,            -- epoch seconds; NULL = still current
+            price_p     REAL    NOT NULL,   -- pence per kWh, VAT included
+            PRIMARY KEY (tariff_key, region, register, valid_from)
+        );
+        CREATE TABLE IF NOT EXISTS unit_rate_fetches (
+            tariff_key  TEXT NOT NULL,
+            region      TEXT NOT NULL,
+            range_from  TEXT NOT NULL,      -- first local day covered
+            range_to    TEXT NOT NULL,      -- last local day covered
+            fetched_at  REAL NOT NULL,      -- epoch seconds of the fetch
+            PRIMARY KEY (tariff_key, region)
         );
         CREATE TABLE IF NOT EXISTS standing_charges (
             tariff_key  TEXT NOT NULL,
@@ -104,13 +122,17 @@ def get_coverage(db_path, region):
     con = None
     try:
         con = sqlite3.connect(db_path)
+        # MIN and MAX in one SELECT make SQLite read the whole table; as two
+        # subqueries each is a search of the primary key.
         imp = con.execute(
-            "SELECT MIN(slot_start), MAX(slot_start) FROM agile_import WHERE region=?",
-            (region,)
+            "SELECT (SELECT MIN(slot_start) FROM agile_import WHERE region=?), "
+            "(SELECT MAX(slot_start) FROM agile_import WHERE region=?)",
+            (region, region)
         ).fetchone()
         exp = con.execute(
-            "SELECT MIN(slot_start), MAX(slot_start) FROM agile_export WHERE region=?",
-            (region,)
+            "SELECT (SELECT MIN(slot_start) FROM agile_export WHERE region=?), "
+            "(SELECT MAX(slot_start) FROM agile_export WHERE region=?)",
+            (region, region)
         ).fetchone()
         return (imp[0], imp[1], exp[0], exp[1]) if imp else (None, None, None, None)
     except sqlite3.Error:
@@ -233,7 +255,7 @@ STANDING_REFRESH_SECONDS = 24 * 3600
 
 
 def standing_charges_by_day(db_path, region, date_from, date_to, names=None,
-                            products=None, log_fn=None, now=None):
+                            products=None, log_fn=None, now=None, two_rate=()):
     """Octopus's standing charge for each day of date_from..date_to.
 
     names:    {key: display name of the variable Octopus import product}, e.g.
@@ -243,6 +265,8 @@ def standing_charges_by_day(db_path, region, date_from, date_to, names=None,
     products: {key: product code} for a tariff whose code is already known
               (the Tracker product setting); no lookup.
     now:      epoch seconds, for tests.
+    two_rate: keys priced on a two-rate (Economy 7) meter, whose figures sit
+              under the E-2R tariff code.
 
     Returns {key: {"YYYY-MM-DD": pence_a_day}}. A key whose figures could not
     be fetched and were never saved is left out, and the caller uses its own
@@ -280,9 +304,10 @@ def standing_charges_by_day(db_path, region, date_from, date_to, names=None,
                 product = discovered.get(label.lower())
                 if not product:
                     raise LookupError(f"Octopus has no current tariff called '{label}'")
+            code = _tariff_code(product, region, key in two_rate)
             periods = parse_standing_charges(_api_get_all(
                 f"{_API_BASE}/products/{product}/electricity-tariffs/"
-                f"E-1R-{product}-{region}/standing-charges/?page_size={_PAGE_SIZE}"))
+                f"{code}/standing-charges/?page_size={_PAGE_SIZE}"))
             if not periods:
                 raise LookupError("Octopus returned no standing charges")
             _store_standing(db_path, key, region, product, periods, now)
@@ -349,18 +374,216 @@ def standing_for_day(periods, day_str):
 def _discover_import_products():
     """{display name lower: product code} for Octopus's variable import
     products, the most recent where two share a name. Raises on failure."""
+    return _discover_products("IMPORT")
+
+
+def _discover_products(direction="IMPORT"):
+    """{display name lower: product code} for Octopus's variable products in
+    one direction (IMPORT or EXPORT), the most recent where two share a name.
+    Raises on failure."""
     data = _api_get(f"{_API_BASE}/products/?is_variable=true&brand=OCTOPUS_ENERGY"
                     f"&page_size=100")
     best = {}
     for product in data.get("results", []):
         name = str(product.get("display_name", "")).strip().lower()
         code = product.get("code")
-        if not name or not code or product.get("direction", "IMPORT") != "IMPORT":
+        if not name or not code or product.get("direction", "IMPORT") != direction:
             continue
         when = product.get("available_from", "") or ""
         if name not in best or when > best[name][0]:
             best[name] = (when, code)
     return {name: code for name, (_when, code) in best.items()}
+
+
+def _tariff_code(product, region, two_rate=False):
+    """Octopus's tariff code: E-1R for a single-rate meter, E-2R for a
+    two-rate (Economy 7) one."""
+    return f"E-{'2' if two_rate else '1'}R-{product}-{region}"
+
+
+# ---------------------------------------------------------------------------
+# Unit prices for the time-of-use tariffs (v1.12)
+# ---------------------------------------------------------------------------
+# Until v1.12 Flux, Go and Cosy were priced from a table typed in on
+# 02-05-2026 (Flux off-peak 7.01p, about half the real price). Octopus
+# publishes each tariff's prices for every region with the times they apply,
+# so they are fetched for the report period, kept in this database, and asked
+# for again at most once a day for a period already held.
+
+UNIT_RATE_REFRESH_SECONDS = 24 * 3600
+
+
+def unit_rates(db_path, region, date_from, date_to, specs=None, log_fn=None, now=None):
+    """Octopus's unit prices for date_from..date_to.
+
+    specs: {key: {"octopus_name": exact display name, "direction": "IMPORT"
+           or "EXPORT", "two_rate": True for Economy 7}}, normally
+           tariff_engine.live_rate_specs(). The product is found by exact
+           name, so "Octopus Flux Import" never picks up "Intelligent Octopus
+           Flux Import".
+    now:   epoch seconds, for tests.
+
+    Returns {key: {register: [(start, end or None, pence_per_kWh), ...]}} with
+    register "standard", or "day" and "night" for Economy 7; times are epoch
+    seconds. A key with nothing fetched or saved is left out and the caller
+    uses its own figures. Each failure is one WARNING naming the tariff.
+    """
+    def _log(msg, level="INFO"):
+        if log_fn:
+            log_fn(f"[Rates] {msg}", level=level)
+
+    specs = dict(specs or {})
+    if not specs:
+        return {}
+    now = time.time() if now is None else now
+    init_agile_db(db_path)
+    want_from = date_from.strftime("%Y-%m-%d")
+    want_to   = date_to.strftime("%Y-%m-%d")
+
+    discovered = {}          # {direction: {name lower: code}}
+    discover_error = {}
+    for key, spec in specs.items():
+        label = spec.get("octopus_name") or key
+        held = _rate_fetch_record(db_path, key, region)
+        if (held and held[0] <= want_from and held[1] >= want_to
+                and now - held[2] < UNIT_RATE_REFRESH_SECONDS):
+            continue
+        direction = spec.get("direction", "IMPORT")
+        two_rate  = bool(spec.get("two_rate"))
+        try:
+            if direction not in discovered and direction not in discover_error:
+                try:
+                    discovered[direction] = _discover_products(direction)
+                except Exception as exc:
+                    discover_error[direction] = exc
+            if direction in discover_error:
+                raise discover_error[direction]
+            product = discovered[direction].get(label.lower())
+            if not product:
+                raise LookupError(f"Octopus has no current tariff called '{label}'")
+            code = _tariff_code(product, region, two_rate)
+            period_from = (date_from - timedelta(days=1)).strftime("%Y-%m-%dT00:00:00Z")
+            period_to   = (date_to + timedelta(days=2)).strftime("%Y-%m-%dT00:00:00Z")
+            got = {}
+            for register in (("day", "night") if two_rate else ("standard",)):
+                periods = parse_unit_rates(_api_get_all(
+                    f"{_API_BASE}/products/{product}/electricity-tariffs/{code}/"
+                    f"{register}-unit-rates/?page_size={_PAGE_SIZE}"
+                    f"&period_from={period_from}&period_to={period_to}"))
+                if not periods:
+                    raise LookupError(f"Octopus returned no {register} unit prices")
+                got[register] = periods
+            _store_unit_rates(db_path, key, region, product, got, want_from, want_to,
+                              held, now)
+            sizes = ", ".join(f"{len(v)} {r}" for r, v in got.items())
+            _log(f"{label} unit prices for region {region} saved ({sizes} periods, {product})")
+        except Exception as exc:
+            saved = ("the prices saved from earlier fetches where they cover the period, "
+                     "otherwise the plugin's own figures" if held else "the plugin's own figures")
+            _log(f"Could not fetch {label} unit prices for region {region} from Octopus "
+                 f"({exc}). Using {saved}.", level="WARNING")
+
+    lo = (datetime(date_from.year, date_from.month, date_from.day)
+          - timedelta(days=2)).timestamp()
+    hi = (datetime(date_to.year, date_to.month, date_to.day)
+          + timedelta(days=3)).timestamp()
+    result = {}
+    for key in specs:
+        regs = _load_unit_rates(db_path, key, region, lo, hi)
+        if regs:
+            result[key] = regs
+    return result
+
+
+def parse_unit_rates(results):
+    """[(start, end or None, pence_per_kWh), ...] in epoch seconds from an
+    Octopus unit-rates list, oldest first. Where Octopus gives separate
+    direct-debit and other prices, the direct-debit one is kept."""
+    items = [r for r in (results or []) if isinstance(r, dict)]
+    methods = {r.get("payment_method") for r in items}
+    if "DIRECT_DEBIT" in methods:
+        items = [r for r in items if r.get("payment_method") in (None, "", "DIRECT_DEBIT")]
+    periods = {}
+    for item in items:
+        try:
+            value = float(item.get("value_inc_vat"))
+            start = _utc_epoch(item.get("valid_from"))
+        except (TypeError, ValueError):
+            continue
+        if value != value:
+            continue
+        raw_to = item.get("valid_to")
+        try:
+            end = _utc_epoch(raw_to) if raw_to else None
+        except (TypeError, ValueError):
+            end = None
+        periods[start] = (start, end, value)
+    return [periods[k] for k in sorted(periods)]
+
+
+def _utc_epoch(utc_str):
+    """Epoch seconds from an Octopus ISO time ('...Z' or with an offset)."""
+    return int(datetime.fromisoformat(str(utc_str).replace("Z", "+00:00")).timestamp())
+
+
+def _rate_fetch_record(db_path, key, region):
+    """(range_from, range_to, fetched_at) of the last good fetch, or None."""
+    con = None
+    try:
+        con = sqlite3.connect(db_path)
+        row = con.execute(
+            "SELECT range_from, range_to, fetched_at FROM unit_rate_fetches "
+            "WHERE tariff_key=? AND region=?", (key, region)).fetchone()
+        return tuple(row) if row else None
+    except sqlite3.Error:
+        return None
+    finally:
+        if con is not None:
+            con.close()
+
+
+def _store_unit_rates(db_path, key, region, product, registers, want_from, want_to,
+                      held, now):
+    """Save fetched periods and widen the record of what is held."""
+    range_from, range_to = want_from, want_to
+    if held and held[0] <= want_to and held[1] >= want_from:
+        range_from, range_to = min(held[0], want_from), max(held[1], want_to)
+    con = sqlite3.connect(db_path)
+    try:
+        for register, periods in registers.items():
+            con.executemany(
+                "INSERT OR REPLACE INTO unit_rates "
+                "(tariff_key, region, register, product, valid_from, valid_to, price_p) "
+                "VALUES (?,?,?,?,?,?,?)",
+                [(key, region, register, product, a, b, p) for (a, b, p) in periods])
+        con.execute(
+            "INSERT OR REPLACE INTO unit_rate_fetches "
+            "(tariff_key, region, range_from, range_to, fetched_at) VALUES (?,?,?,?,?)",
+            (key, region, range_from, range_to, now))
+        con.commit()
+    finally:
+        con.close()
+
+
+def _load_unit_rates(db_path, key, region, lo, hi):
+    """{register: [(start, end, price), ...]} for periods touching lo..hi."""
+    con = None
+    try:
+        con = sqlite3.connect(db_path)
+        rows = con.execute(
+            "SELECT register, valid_from, valid_to, price_p FROM unit_rates "
+            "WHERE tariff_key=? AND region=? AND valid_from < ? "
+            "AND (valid_to IS NULL OR valid_to > ?) ORDER BY valid_from",
+            (key, region, hi, lo)).fetchall()
+    except sqlite3.Error:
+        return {}
+    finally:
+        if con is not None:
+            con.close()
+    out = {}
+    for register, a, b, p in rows:
+        out.setdefault(register, []).append((a, b, p))
+    return out
 
 
 def _api_get_all(url):

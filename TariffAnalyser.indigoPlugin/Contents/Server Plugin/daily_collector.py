@@ -6,9 +6,9 @@
 #              one row per calendar day into the daily_summary table.
 #              Runs rolling 7-day refresh to handle Octopus data delays
 #              (gas up to 2 days late, export up to 4 days late).
-# Author:      CliveS & Claude Sonnet 4.6
-# Date:        06-05-2026
-# Version:     1.0
+# Author:      CliveS & Claude Opus 5.5
+# Date:        05-10-2026
+# Version:     1.1
 
 import base64
 import json
@@ -36,24 +36,15 @@ _REQUEST_TIMEOUT      = 30
 # 27-09-2026 (tariff_engine.OCTOPUS_STANDING_UPDATED).
 ELEC_STANDING_P_DAY   = 61.51824
 GAS_STANDING_P_DAY    = 29.06169
-EXPORT_RATE_P         = 12.0     # pence/kWh — Octopus Outgoing flat rate
+# pence/kWh — Octopus Outgoing flat rate, used only for a day with no export
+# price recorded by SigenEnergyManager (daily_history.json export_rate_p)
+EXPORT_RATE_P         = 12.0
 
-# Octopus Go rates
-GO_CHEAP_P            = 7.5      # pence/kWh 00:30-05:30
-GO_PEAK_P             = 24.0     # pence/kWh all other times
-GO_CHEAP_START        = "00:30"
-GO_CHEAP_END          = "05:30"
+# Octopus Go and Flux unit prices come from Octopus's published prices for
+# each half-hour (config "live_rates", priced through tariff_engine.RateBook)
+# since v1.12, with tariff_engine's dated table as the fallback. The old
+# constants here (Flux 7.01 / 21 / 33p, Go 7.5 / 24p) are gone.
 GO_STANDING_P_DAY     = 63.21819
-
-# Octopus Flux rates — current published rates, region F.
-# Fetched live from API where possible; these serve as fallback.
-FLUX_OFFPEAK_P        = 7.01     # pence/kWh 02:00-05:00
-FLUX_SHOULDER_P       = 21.00    # pence/kWh (all other hours)
-FLUX_PEAK_P           = 33.00    # pence/kWh 16:00-19:00
-FLUX_OFFPEAK_START    = "02:00"
-FLUX_OFFPEAK_END      = "05:00"
-FLUX_PEAK_START       = "16:00"
-FLUX_PEAK_END         = "19:00"
 FLUX_STANDING_P_DAY   = 61.51824
 
 # Gas kWh conversion: Octopus consumption API returns cubic metres.
@@ -193,6 +184,13 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
         live_standing   {tariff_key: {"YYYY-MM-DD": pence_a_day}} from
                         octopus_prices.standing_charges_by_day(); "go" and
                         "flux" are used, else GO_/FLUX_STANDING_P_DAY
+        live_rates      {tariff_key: {register: [(start, end, p), ...]}} from
+                        octopus_prices.unit_rates(); Go, Flux and Flux Export
+                        are priced from it per meter half-hour, else from
+                        tariff_engine's table
+    The actual export revenue uses the export price SigenEnergyManager
+    recorded for each day, else EXPORT_RATE_P. Hypothetical Flux nets off its
+    export at Flux Export prices when the export meter's half-hours are known.
     The actual tariff's and gas's standing charges come from the daily_history.json
     SigenEnergyManager keeps beside timeseries_db, else the constants.
     """
@@ -210,7 +208,7 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
     # ------------------------------------------------------------------ fetch
     tracker_rates  = _fetch_tracker_rates(date_from, date_to, region,
                                           config.get("tracker_product", ""), _log)
-    flux_rates     = _fetch_flux_rates(region, _log)
+    book           = tariff_engine.RateBook(config.get("live_rates") or {}, date_from, date_to)
     elec_slots     = _fetch_octopus_consumption(
         api_key, config.get("mpan", ""), config.get("serial", ""),
         "electricity", date_from, date_to, _log
@@ -237,6 +235,7 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
     history_path  = tariff_engine.recorded_standing_path(config.get("timeseries_db", ""))
     elec_standing = tariff_engine.load_recorded_standing(history_path, "elec_standing_p_day")
     gas_standing  = tariff_engine.load_recorded_standing(history_path, "gas_standing_p_day")
+    recorded_exp  = tariff_engine.load_recorded_export(history_path)
     live_standing = config.get("live_standing") or {}
     go_standing   = live_standing.get("go") or {}
     flux_standing = live_standing.get("flux") or {}
@@ -275,8 +274,8 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
 
         # Tracker rate for this day
         tracker_p = tracker_rates.get(ds)
-        if tracker_p is None and sg.get("tracker_avg_p"):
-            tracker_p = sg["tracker_avg_p"]   # from halfhourly table
+        if tracker_p is None and sg.get("tracker_avg_p") is not None:
+            tracker_p = sg["tracker_avg_p"]   # from halfhourly table (0p is a price)
 
         # Use Octopus metered import for cost calcs where available,
         # fall back to Sigenergy figure
@@ -288,7 +287,8 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
         # missing we write NULL for the import-derived fields rather than a
         # real-looking £0 day (a missing rate must be distinguishable from a
         # genuinely zero-cost day).
-        elec_exp_rev_p = billing_exp_kwh * EXPORT_RATE_P
+        exp_rate_p     = recorded_exp.get(ds, EXPORT_RATE_P)
+        elec_exp_rev_p = billing_exp_kwh * exp_rate_p
         if tracker_p is not None:
             elec_imp_cost_p = billing_imp_kwh * tracker_p
             elec_net_p      = elec_imp_cost_p - elec_exp_rev_p
@@ -300,7 +300,8 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
 
         # Savings vs no solar — only meaningful from the solar install date,
         # when one is set
-        if (install_date is None or cur >= install_date) and tracker_p and home_kwh > 0:
+        if ((install_date is None or cur >= install_date) and tracker_p is not None
+                and home_kwh > 0):
             cost_no_solar_p    = home_kwh * tracker_p
             savings_p          = (cost_no_solar_p - elec_imp_cost_p) + elec_exp_rev_p
         elif tracker_p is not None:
@@ -316,23 +317,26 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
         # ignoring it understated the real saving).
         go_imp_p = None
         if oct_imp_slots:
-            go_imp_p = _apply_tou_simple(
-                oct_imp_slots, GO_CHEAP_START, GO_CHEAP_END, GO_CHEAP_P, GO_PEAK_P
-            )
+            go_imp_p = _price_meter_slots(book, "go", tariff_engine.IMPORT_TARIFFS["go"],
+                                          ds, oct_imp_slots)
         go_net_p    = (go_imp_p - elec_exp_rev_p) if go_imp_p is not None else None
         go_save_p   = (
             (elec_imp_cost_p + elec_sc_p) - (go_imp_p + go_sc_p)
             if (go_imp_p is not None and elec_imp_cost_p is not None) else None
         )
 
-        # Flux cost — apply 3-band TOU
-        flux_op  = flux_rates.get("offpeak_p", FLUX_OFFPEAK_P)
-        flux_sh  = flux_rates.get("shoulder_p", FLUX_SHOULDER_P)
-        flux_pk  = flux_rates.get("peak_p", FLUX_PEAK_P)
+        # Flux cost — Octopus's Flux prices per meter half-hour, and its export
+        # at Flux Export prices (Octopus sells the two only as a pair)
         flux_imp_p = None
         if oct_imp_slots:
-            flux_imp_p = _apply_tou_flux(oct_imp_slots, flux_op, flux_sh, flux_pk)
-        flux_net_p    = (flux_imp_p - elec_exp_rev_p) if flux_imp_p is not None else None
+            flux_imp_p = _price_meter_slots(book, "flux", tariff_engine.IMPORT_TARIFFS["flux"],
+                                            ds, oct_imp_slots)
+        flux_exp_rev_p = elec_exp_rev_p
+        if oct_exp_slots:
+            flux_exp_rev_p = _price_meter_slots(
+                book, "flux_export", tariff_engine.EXPORT_TARIFFS["flux_export"],
+                ds, oct_exp_slots, "export")
+        flux_net_p    = (flux_imp_p - flux_exp_rev_p) if flux_imp_p is not None else None
         flux_save_p   = (
             (elec_imp_cost_p + elec_sc_p) - (flux_imp_p + flux_sc_p)
             if (flux_imp_p is not None and elec_imp_cost_p is not None) else None
@@ -388,11 +392,6 @@ def update_daily_summary(db_path, date_from, date_to, config, log_fn=None):
 
     _log(f"Written {rows_written} daily_summary rows")
     return rows_written
-
-
-def get_flux_rates(region="F", log_fn=None):
-    """Return current live Flux rates for display/config purposes."""
-    return _fetch_flux_rates(region, log_fn)
 
 
 def get_daily_summary_rows(db_path, date_from, date_to):
@@ -809,113 +808,21 @@ def _fetch_tracker_rates(date_from, date_to, region, product, log_fn):
 
 
 # ---------------------------------------------------------------------------
-# Octopus Flux rates (live fetch)
+# Time-of-use pricing of meter half-hours
 # ---------------------------------------------------------------------------
 
-def _fetch_flux_rates(region, log_fn):
-    """Discover and return current Octopus Flux rates for the region.
-
-    Returns dict: {offpeak_p, shoulder_p, peak_p}.
-    Falls back to module-level constants if API unavailable.
-    """
-    fallback = {
-        "offpeak_p":  FLUX_OFFPEAK_P,
-        "shoulder_p": FLUX_SHOULDER_P,
-        "peak_p":     FLUX_PEAK_P,
-    }
-
-    try:
-        # Discover Flux import product code
-        data     = _api_get(f"{_API_BASE}/products/", params={"page_size": 100})
-        products = data.get("results", [])
-        flux_code = None
-        for p in products:
-            if p.get("code", "").startswith("FLUX-IMPORT"):
-                flux_code = p["code"]
-                break
-        if not flux_code:
-            return fallback
-
-        tariff_code = f"E-1R-{flux_code}-{region}"
-        url = (
-            f"{_API_BASE}/products/{flux_code}/electricity-tariffs/"
-            f"{tariff_code}/standard-unit-rates/"
-        )
-        # Fetch today's Flux rate schedule
-        today = date.today()
-        params = {
-            "period_from": f"{today.isoformat()}T00:00:00Z",
-            "period_to":   f"{today.isoformat()}T23:59:59Z",
-            "page_size":   50,
-        }
-        data    = _api_get(url, params=params)
-        results = data.get("results", [])
-
-        offpeak_rates  = []
-        shoulder_rates = []
-        peak_rates     = []
-
-        for item in results:
-            valid_from = item.get("valid_from", "")
-            rate_p     = float(item.get("value_inc_vat", 0))
-            if not valid_from:
-                continue
-            local_dt = _utc_to_local_dt(valid_from)
-            hhmm     = local_dt.strftime("%H:%M")
-
-            if _in_window(hhmm, FLUX_OFFPEAK_START, FLUX_OFFPEAK_END):
-                offpeak_rates.append(rate_p)
-            elif _in_window(hhmm, FLUX_PEAK_START, FLUX_PEAK_END):
-                peak_rates.append(rate_p)
-            else:
-                shoulder_rates.append(rate_p)
-
-        result = {
-            "offpeak_p":  round(sum(offpeak_rates)  / len(offpeak_rates),  4) if offpeak_rates  else FLUX_OFFPEAK_P,
-            "shoulder_p": round(sum(shoulder_rates) / len(shoulder_rates), 4) if shoulder_rates else FLUX_SHOULDER_P,
-            "peak_p":     round(sum(peak_rates)     / len(peak_rates),     4) if peak_rates     else FLUX_PEAK_P,
-        }
-        log_fn(f"Flux rates fetched: off-peak={result['offpeak_p']}p  "
-               f"shoulder={result['shoulder_p']}p  peak={result['peak_p']}p")
-        return result
-
-    except Exception as exc:
-        log_fn(f"Flux rate fetch failed (using defaults): {exc}", level="WARNING")
-        return fallback
-
-
-# ---------------------------------------------------------------------------
-# TOU cost calculators
-# ---------------------------------------------------------------------------
-
-def _apply_tou_simple(slots, cheap_start, cheap_end, cheap_p, peak_p):
-    """Apply a simple two-band TOU rate to a list of (hhmm_str, kwh) tuples."""
+def _price_meter_slots(book, key, tariff, ds, slots, direction="import"):
+    """Pence for a day's meter half-hours [(local HH:MM, kWh), ...] under a
+    tariff, each half-hour at the price in force (tariff_engine.RateBook:
+    Octopus's published price, else the table)."""
     total_p = 0.0
     for hhmm, kwh in slots:
-        rate = cheap_p if _in_window(hhmm, cheap_start, cheap_end) else peak_p
+        s = tariff_engine.local_epoch(f"{ds}T{hhmm}:00")
+        rate, _src = book.rate(key, tariff, s, s + tariff_engine.SLOT_SECONDS, direction)
+        if rate is None:
+            return None
         total_p += kwh * rate
     return total_p
-
-
-def _apply_tou_flux(slots, offpeak_p, shoulder_p, peak_p):
-    """Apply Flux three-band TOU rate to a list of (hhmm_str, kwh) tuples."""
-    total_p = 0.0
-    for hhmm, kwh in slots:
-        if _in_window(hhmm, FLUX_OFFPEAK_START, FLUX_OFFPEAK_END):
-            rate = offpeak_p
-        elif _in_window(hhmm, FLUX_PEAK_START, FLUX_PEAK_END):
-            rate = peak_p
-        else:
-            rate = shoulder_p
-        total_p += kwh * rate
-    return total_p
-
-
-def _in_window(hhmm, start, end):
-    """True if hhmm falls in [start, end) — handles overnight windows."""
-    if start <= end:
-        return start <= hhmm < end
-    return hhmm >= start or hhmm < end
 
 
 # ---------------------------------------------------------------------------

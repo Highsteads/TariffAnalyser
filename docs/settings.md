@@ -20,7 +20,7 @@ The plugin has no devices, so all its settings are in one place: **Plugins → T
 | Setting | What it does |
 |---|---|
 | **Octopus region (for Agile prices)** | Your area, as a letter, which decides the Agile prices and the Octopus standing charges used, and the Tracker price if you set a Tracker product code below. It starts at F, North East England, which is mine. The table below lists the letters. |
-| **Export tariff to use in comparisons** | The export price used for every tariff in the comparison, and for the Energy Summary. It starts at **Octopus Outgoing 12p flat (actual)**. The [tariffs page](tariffs.md) lists the choices. |
+| **Export tariff to use in comparisons** | The export price for every tariff in the comparison except your own row, which uses the export price SigenEnergyManager recorded for each day, and Flux, which always uses Flux Export. Your own row and the Energy Summary use it only for a day with no recorded price. It starts at **Octopus Outgoing 12p flat**. The [tariffs page](tariffs.md) lists the choices. |
 | **Gas unit rate (pence/kWh)** | The price you pay for a unit of gas, used only to cost your gas in the nightly collection. It starts at 6.09. Change it when your gas price changes. |
 | **Default report date range** | How many days of Agile prices the **Update Octopus Agile Price Data** action fetches, counting back from today — 30, 60, 90, 180 or 365. It starts at 30. It does not change the period of either report, which you choose each time. |
 

@@ -3,13 +3,15 @@
 # Filename:    report_generator.py
 # Description: Generates HTML tariff comparison + savings reports and opens
 #              them in the default browser.  CSV output was removed in v1.2.
-# Author:      CliveS & Claude Sonnet 4.6
-# Date:        10-05-2026
-# Version:     1.2
+# Author:      CliveS & Claude Opus 5.5
+# Date:        05-10-2026
+# Version:     1.3
 
 import os
 import subprocess
 from datetime import date, datetime, timedelta
+from collections import Counter
+
 import tariff_engine
 
 
@@ -106,6 +108,91 @@ def standing_notes(comparison, actual_label):
         verb = "uses a typical standing charge" if len(others) == 1 else "use typical standing charges"
         notes.append(f"{_join_names(others)} {verb} last checked "
                      f"{_uk_date(tariff_engine.REFERENCE_RATES_UPDATED)}.")
+    return notes
+
+
+def _share(n, total):
+    pct = 100.0 * n / total if total else 0.0
+    if pct >= 99.5:
+        return "all"
+    if pct < 1:
+        return "under 1%"
+    return f"{pct:.0f}%"
+
+
+def rate_notes(comparison):
+    """Plain sentences saying where each tariff's unit and export prices came
+    from (v1.12): Octopus's published prices, the plugin's own dated
+    figures where Octopus's could not be fetched, or recorded prices."""
+    sources  = comparison.get("rate_sources") or {}
+    exports  = comparison.get("export_sources") or {}
+    ekeys    = comparison.get("export_keys") or {}
+    chosen   = comparison.get("export_tariff_key") or "outgoing_12p"
+    names    = {r["tariff_key"]: r["tariff_name"] for r in comparison.get("results", [])}
+    table_on = _uk_date(tariff_engine.OCTOPUS_RATES_UPDATED)
+    notes = []
+
+    live_ok, live_part = [], []
+    for key, used in sources.items():
+        tariff = tariff_engine.IMPORT_TARIFFS.get(key, {})
+        if not tariff.get("octopus_name") or tariff.get("type") not in ("tou", "tou_multi"):
+            continue
+        total = sum(used.values())
+        table = used.get("table", 0)
+        if not total:
+            continue
+        if table:
+            share = _share(table, total)
+            name = names.get(key, key)
+            live_part.append(name if share == "all" else f"{name} ({share} of its half-hours)")
+        else:
+            live_ok.append(names.get(key, key))
+    if live_ok:
+        verb = "uses" if len(live_ok) == 1 else "use"
+        notes.append(f"{_join_names(live_ok)} {verb} the unit prices Octopus published "
+                     f"for your region, as they stood on each day.")
+    if live_part:
+        notes.append(f"Octopus's prices could not be fetched for {_join_names(live_part)}, "
+                     f"so those half-hours use the plugin's own figures: Octopus's prices "
+                     f"for North East England on {table_on}. The Event Log says why.")
+    if "economy7" in sources:
+        notes.append("Economy 7 assumes night hours of 12:30am to 7:30am; your meter's "
+                     "hours may differ.")
+
+    if "tracker" in exports:
+        used = exports["tracker"]
+        total = sum(used.values())
+        actual = names.get("tracker", tariff_engine.GENERIC_RECORDED_NAME)
+        chosen_name = tariff_engine.EXPORT_TARIFFS.get(chosen, {}).get("name", chosen)
+        text = (f"{actual} is paid for export at the price SigenEnergyManager recorded "
+                f"for each day.")
+        if used.get("chosen"):
+            text += (f" It recorded none for {_share(used['chosen'], total)} of the "
+                     f"half-hours that exported, so those use {chosen_name}.")
+        notes.append(text)
+    flux_export = [names.get(k, k) for k, ek in ekeys.items() if ek == "flux_export"
+                   and k in names]
+    if flux_export and chosen != "flux_export":
+        verb = "is" if len(flux_export) == 1 else "are"
+        notes.append(f"{_join_names(flux_export)} {verb} paid for export at Octopus Flux "
+                     f"Export prices, because Octopus sells Flux import only with Flux Export.")
+    others = [names[k] for k, ek in ekeys.items() if ek == chosen and k in names]
+    if others:
+        chosen_name = tariff_engine.EXPORT_TARIFFS.get(chosen, {}).get("name", chosen)
+        notes.append(f"Every other tariff is paid for export at {chosen_name}, the export "
+                     f"tariff chosen in the plugin settings.")
+    fe_used = Counter()
+    for k, ek in ekeys.items():
+        if ek == "flux_export" or (ek == "recorded" and chosen == "flux_export"):
+            fe_used.update(exports.get(k, {}))
+    if fe_used.get("table"):
+        notes.append(f"Octopus's Flux Export prices could not be fetched for some "
+                     f"half-hours, which use Octopus's North East England prices on "
+                     f"{table_on}.")
+    notes.append("Prices change on the hour and half hour, but SigenEnergyManager's "
+                 "half-hourly records start a few minutes either side. A record that "
+                 "spans a price change is split between the two prices in proportion to "
+                 "time, which assumes the energy was used evenly through it.")
     return notes
 
 
@@ -258,6 +345,7 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
         self_suff_str = f'<div class="totalrow"><span>Self-sufficiency</span><span>{self_suff:.1f}%</span></div>'
 
     standing_html = "\n    ".join(f"<li>{n}</li>" for n in standing_notes(comparison, actual_label))
+    rates_html    = "\n    ".join(f"<li>{n}</li>" for n in rate_notes(comparison))
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -308,7 +396,7 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
   <h1>Tariff Comparison</h1>
   <div class="meta">
     {from_uk} - {to_uk} · {days} day{'s' if days != 1 else ''} · {slots} slots ({slots_per_day:.1f}/day)
-    · Export tariff: {export_tariff_name} · Generated {generated_at}
+    · Export tariff for the comparison: {export_tariff_name} · Generated {generated_at}
   </div>
 
   <div class="totals">
@@ -344,7 +432,8 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
   <ul class="notes">
     <li>Comparison assumes identical energy consumption patterns across all tariffs.  Real savings on time-of-use tariffs (Go, Cosy, Flux, Agile) may be higher because battery dispatch would be optimised for cheap windows.</li>
     <li>Every tariff is priced over the same set of half-hourly slots — those where all selected tariffs had a price — so the ranking is like-for-like.  The Coverage column shows each tariff's own data availability; when it is below 100% the £ totals are for the covered portion of the period.</li>
-    <li>{actual_label} uses the prices SigenEnergyManager recorded for each half-hour, and Agile uses Octopus's published prices.  The other tariffs (Go, Cosy, Flux, Ofgem cap, and the fixed suppliers) use illustrative "typical" published unit prices last checked {tariff_engine.REFERENCE_RATES_UPDATED} — treat them as a guide, not your exact contract.</li>
+    <li>{actual_label} uses the prices SigenEnergyManager recorded for each half-hour, and Agile uses Octopus's published prices.  The Ofgem cap and the fixed suppliers use illustrative "typical" unit prices last checked {_uk_date(tariff_engine.REFERENCE_RATES_UPDATED)} — treat them as a guide, not your exact contract.</li>
+    {rates_html}
     {standing_html}
     <li>All costs include VAT at 5%.</li>
   </ul>
@@ -371,6 +460,93 @@ def open_in_browser(filepath, log_fn=None):
     except Exception as exc:
         _log(f"[Daily] Could not open browser: {exc}", level="WARNING")
         return False
+
+
+def _gbp(p):
+    """Pence as pounds: £1.90, or -£0.40 for a credit or a loss."""
+    sign = "-" if p < 0 else ""
+    return f"{sign}£{abs(p) / 100:.2f}"
+
+
+def savings_card_html(label, d_from, d_to, s):
+    """One period's card on the Solar Savings Summary. The parts listed under
+    the total always add up to it, and so does would-have-paid minus paid."""
+    if s is None:
+        return f"""
+        <div class="period-card">
+          <div class="period-header">{label}</div>
+          <div class="period-dates">{d_from.strftime('%-d %b')} – {d_to.strftime('%-d %b %Y')}</div>
+          <div class="no-data">No data available</div>
+        </div>"""
+
+    # Share of the house's use met by solar, directly or stored. Not a share of
+    # the period's generation: solar stored yesterday can be used today.
+    solar_share = (s["pv_to_home_kwh"] / s["home_kwh"] * 100) if s["home_kwh"] >= 0.01 else 0.0
+    days_span   = (d_to - d_from).days + 1
+    actual_days = max(1.0, s["slots"] / 48.0)   # real days with data, not calendar span
+    daily_avg   = s["total_savings_p"] / actual_days
+    annual_proj = daily_avg * 365
+    data_note   = (f"based on {actual_days:.0f} day{'s' if actual_days != 1 else ''} of data"
+                   if actual_days < days_span else "")
+    paid        = s["cost_with_solar_p"]
+    paid_label  = "Actually paid" if paid >= 0 else "Actually earned"
+
+    return f"""
+        <div class="period-card">
+          <div class="period-header">{label}</div>
+          <div class="period-dates">{d_from.strftime('%-d %b')} – {d_to.strftime('%-d %b %Y')}</div>
+          <div class="saving-total">{_gbp(s['total_savings_p'])}</div>
+          <div class="saving-label">total saved</div>
+          <div class="breakdown">
+            <div class="brow">
+              <span>Solar generated</span>
+              <span class="pv">{s['pv_kwh']:.1f} kWh</span>
+            </div>
+            <div class="brow">
+              <span>Solar used at home</span>
+              <span class="pv">{s['pv_to_home_kwh']:.1f} kWh ({solar_share:.0f}% of the house's use)</span>
+            </div>
+            <div class="brow">
+              <span>Exported</span>
+              <span class="exp">{s['export_kwh']:.1f} kWh</span>
+            </div>
+            <div class="brow">
+              <span>Battery charged from the grid</span>
+              <span>{s.get('grid_charged_kwh', 0.0):.1f} kWh</span>
+            </div>
+            <div class="brow divider"></div>
+            <div class="brow">
+              <span>Solar used at home</span>
+              <span class="exp">{_gbp(s['avoided_import_p'])}</span>
+            </div>
+            <div class="brow">
+              <span>Solar exported</span>
+              <span class="exp">{_gbp(s.get('solar_export_p', 0.0))}</span>
+            </div>
+            <div class="brow">
+              <span>Time-shifting (battery charged from the grid)</span>
+              <span class="exp">{_gbp(s.get('timeshift_p', 0.0))}</span>
+            </div>
+            <div class="brow divider"></div>
+            <div class="brow">
+              <span>Would have paid</span>
+              <span class="imp">{_gbp(s['cost_without_solar_p'])}</span>
+            </div>
+            <div class="brow">
+              <span>{paid_label}</span>
+              <span>{_gbp(abs(paid))}</span>
+            </div>
+            <div class="brow divider"></div>
+            <div class="brow">
+              <span>Daily average saving</span>
+              <span class="exp">{_gbp(daily_avg)}/day</span>
+            </div>
+            <div class="brow">
+              <span>Projected annual{f' <span class="note">({data_note})</span>' if data_note else ''}</span>
+              <span class="exp"><strong>{_gbp(annual_proj)}/year</strong></span>
+            </div>
+          </div>
+        </div>"""
 
 
 def generate_savings_summary(db_path, output_dir, export_rate_p=12.0, log_fn=None,
@@ -423,76 +599,7 @@ def generate_savings_summary(db_path, output_dir, export_rate_p=12.0, log_fn=Non
     tariff_note_html = (f'<p class="tariff-note">{tariff_note}</p>'
                         if tariff_note else "")
 
-    def fmt_gbp(p):
-        return f"£{p/100:.2f}"
-
-    def savings_block(label, d_from, d_to, s):
-        if s is None:
-            return f"""
-        <div class="period-card">
-          <div class="period-header">{label}</div>
-          <div class="period-dates">{d_from.strftime('%-d %b')} – {d_to.strftime('%-d %b %Y')}</div>
-          <div class="no-data">No data available</div>
-        </div>"""
-
-        self_cons   = (s["pv_to_home_kwh"] / s["pv_kwh"] * 100) if s["pv_kwh"] >= 0.01 else 0.0
-        days_span   = (d_to - d_from).days + 1
-        actual_days = max(1.0, s["slots"] / 48.0)   # real days with data, not calendar span
-        daily_avg   = s["total_savings_p"] / actual_days
-        annual_proj = daily_avg * 365
-        data_note   = (f"based on {actual_days:.0f} day{'s' if actual_days != 1 else ''} of data"
-                       if actual_days < days_span else "")
-
-        return f"""
-        <div class="period-card">
-          <div class="period-header">{label}</div>
-          <div class="period-dates">{d_from.strftime('%-d %b')} – {d_to.strftime('%-d %b %Y')}</div>
-          <div class="saving-total">{fmt_gbp(s['total_savings_p'])}</div>
-          <div class="saving-label">total saved</div>
-          <div class="breakdown">
-            <div class="brow">
-              <span>Solar generated</span>
-              <span class="pv">{s['pv_kwh']:.1f} kWh</span>
-            </div>
-            <div class="brow">
-              <span>Used at home</span>
-              <span class="pv">{s['pv_to_home_kwh']:.1f} kWh ({self_cons:.0f}%)</span>
-            </div>
-            <div class="brow">
-              <span>Exported</span>
-              <span class="exp">{s['export_kwh']:.1f} kWh</span>
-            </div>
-            <div class="brow divider"></div>
-            <div class="brow">
-              <span>Avoided import</span>
-              <span class="exp">{fmt_gbp(s['avoided_import_p'])}</span>
-            </div>
-            <div class="brow">
-              <span>Export revenue</span>
-              <span class="exp">{fmt_gbp(s['export_revenue_p'])}</span>
-            </div>
-            <div class="brow divider"></div>
-            <div class="brow">
-              <span>Would have paid</span>
-              <span class="imp">{fmt_gbp(s['cost_without_solar_p'])}</span>
-            </div>
-            <div class="brow">
-              <span>Actually paid</span>
-              <span>{fmt_gbp(max(0, s['cost_with_solar_p']))}</span>
-            </div>
-            <div class="brow divider"></div>
-            <div class="brow">
-              <span>Daily average saving</span>
-              <span class="exp">{fmt_gbp(daily_avg)}/day</span>
-            </div>
-            <div class="brow">
-              <span>Projected annual{f' <span class="note">({data_note})</span>' if data_note else ''}</span>
-              <span class="exp"><strong>{fmt_gbp(annual_proj)}/year</strong></span>
-            </div>
-          </div>
-        </div>"""
-
-    cards_html = "\n".join(savings_block(l, f, t, s) for l, f, t, s in sections)
+    cards_html = "\n".join(savings_card_html(l, f, t, s) for l, f, t, s in sections)
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -546,14 +653,19 @@ def generate_savings_summary(db_path, output_dir, export_rate_p=12.0, log_fn=Non
 
   <div class="header">
     <h1>Solar Savings Summary</h1>
-    <p>Generated {generated_at} &nbsp;&bull;&nbsp; Export tariff: {export_label}
+    <p>Generated {generated_at} &nbsp;&bull;&nbsp; Export: the price SigenEnergyManager recorded for each day, or {export_label} on any day without one
        &nbsp;&bull;&nbsp; Savings calculated against the prices you actually paid: {tariff_label}</p>
   </div>
 
   <div class="subtitle">
     <strong>How this is calculated:</strong> &ldquo;Without solar&rdquo; assumes all home
     consumption would have been purchased from the grid at the price you actually paid
-    for each half-hour. Savings = avoided import cost + export revenue.
+    for each half-hour, with no battery either. Total saved = what that would have cost minus
+    what you actually paid, and it has three parts: solar used at home (directly, or through
+    the battery), solar exported, and time-shifting &mdash; battery energy charged from the
+    grid when it was cheap and used or sold when it was dearer. The battery&rsquo;s contents
+    are tracked as a solar part and a grid part, and each discharge draws on both in
+    proportion.
     {tariff_note_html}
   </div>
 

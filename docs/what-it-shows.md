@@ -31,7 +31,7 @@ Each tariff has one row, cheapest at the top, marked ★, and dearest at the bot
 |---|---|
 | **Total cost** | What the period would have cost on that tariff: what you bought, less what you sold, plus the standing charge. |
 | **Import** | The cost of the electricity you bought. |
-| **Export** | What the electricity you sold would have earned, at the export tariff chosen in the settings. It is the same for every tariff. |
+| **Export** | What the electricity you sold would have earned on that tariff. Your own row uses the export price recorded for each day, Flux uses Flux Export, and the rest use the export tariff chosen in the settings. |
 | **Standing** | The standing charge for the period, day by day. |
 | **vs actual** | How much cheaper or dearer the tariff is than the row for the prices you actually paid, which is marked **current** and named after the tariff you were on, such as **Octopus Flux (actual)**. |
 | **Coverage** | How much of the period that tariff has a price for. |
@@ -48,7 +48,7 @@ A second table gives the cost of energy on each tariff month by month, with the 
 
 ### The notes
 
-The last section sets out the terms of the comparison: every tariff is given the same pattern of use, the prices other than yours and Agile are typical published prices with the date they were last checked, where each tariff's standing charge came from, including any days SigenEnergyManager had no figure for, and all costs include VAT at 5%.
+The last section sets out the terms of the comparison: every tariff is given the same pattern of use; Agile, Go, Cosy, Flux and Economy 7 use Octopus's published prices, and if any half-hours had to use the plugin's own prices it says which tariff and the date of those prices; the Ofgem cap and fixed deals use typical prices with the date they were last checked; which export price each row used; how a half-hour that spans a price change is split; where each tariff's standing charge came from, including any days SigenEnergyManager had no figure for; and that all costs include VAT at 5%.
 
 Because every tariff is given the same pattern of use, a tariff with a cheap night rate may do better in real life than the report shows, since you would likely charge the battery in the cheap hours.
 
@@ -60,18 +60,20 @@ This answers "what has my solar saved me?" It has five cards: **Today** (so far)
 
 | Shown as | What it means |
 |---|---|
-| **total saved** | What the solar and battery saved in that period — the electricity you did not have to buy, plus what you earned from selling. |
+| **total saved** | What the house's use would have cost if you had bought every unit from the grid, minus what you actually paid. It is the sum of the three lines below it. |
 | **Solar generated** | What your panels made. |
-| **Used at home** | The solar you kept rather than sold, and what share of the solar that was. |
+| **Solar used at home** (kWh) | The solar the house used, straight from the panels or stored in the battery, and what share of the house's use that was. Solar stored on an earlier day counts on the day it is used. |
 | **Exported** | What you sold to the grid. |
-| **Avoided import** | What you would have paid for the electricity your solar and battery supplied instead of the grid. |
-| **Export revenue** | What you earned from selling. |
+| **Battery charged from the grid** | The energy the battery took from the grid. |
+| **Solar used at home** (pounds) | What that solar would have cost to buy at the price of each half-hour. |
+| **Solar exported** | What you earned selling solar, leaving out grid-charged battery energy sold back. |
+| **Time-shifting (battery charged from the grid)** | Battery energy bought from the grid, valued when it was used or sold, less what it cost to buy. It can be negative on a day the battery charges for the next day. [How it works](how-it-works.md) explains how the plugin tells solar from grid energy in the battery. |
 | **Would have paid** | What the house's use would have cost if you had bought every unit from the grid. |
-| **Actually paid** | What you paid for the electricity you bought, less what you earned. If you earned more than you paid, it shows £0.00. |
+| **Actually paid** | What you paid for the electricity you bought, less what you earned. If you earned more than you paid, it says **Actually earned**. |
 | **Daily average saving** | The total saved divided by the days with data. |
 | **Projected annual** | The daily average times 365. If the period has fewer days of data than calendar days, it says how many days it is based on. |
 
-The prices come from the half-hourly price SigenEnergyManager recorded, which is what you actually paid. The top of the page names that tariff, worked out as the [tariffs page](tariffs.md) explains, and says so if it changed this year. Where SigenEnergyManager recorded no price, the summary uses 24.5p, the Ofgem price cap rate in the plugin. Export is priced at the flat rate of your chosen export tariff, and the top of the page gives its name and price, such as SEG Minimum at 1.63p. If you chose Agile Outgoing, which has no flat rate, it is counted at 12p and the page says so.
+The prices come from the half-hourly price SigenEnergyManager recorded, which is what you actually paid. The top of the page names that tariff, worked out as the [tariffs page](tariffs.md) explains, and says so if it changed this year. Where SigenEnergyManager recorded no price, the summary uses 24.5p, the Ofgem price cap rate in the plugin; a recorded price of 0p is kept. Export is priced at the export price SigenEnergyManager recorded for each day. A day with none uses the flat rate of your chosen export tariff, and the top of the page gives its name and price, such as SEG low rate at 1.63p. If you chose Agile Outgoing or Flux Export, which have no flat rate, those days are counted at 12p and the page says so.
 
 A card with no data for its period says **No data available**.
 

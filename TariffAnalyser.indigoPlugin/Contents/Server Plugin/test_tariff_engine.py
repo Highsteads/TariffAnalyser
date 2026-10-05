@@ -106,14 +106,14 @@ class TestImportRateForSlot(unittest.TestCase):
 
     def test_tou_go_cheap_and_peak(self):
         go = te.IMPORT_TARIFFS["go"]
-        self.assertEqual(te._import_rate_for_slot("2026-07-01T03:00:00", go, {}), 7.5)
-        self.assertEqual(te._import_rate_for_slot("2026-07-01T12:00:00", go, {}), 24.0)
+        self.assertEqual(te._import_rate_for_slot("2026-07-01T03:00:00", go, {}), 8.2143)
+        self.assertEqual(te._import_rate_for_slot("2026-07-01T12:00:00", go, {}), 28.3072)
 
     def test_tou_multi_cosy_bands(self):
         cosy = te.IMPORT_TARIFFS["cosy"]
-        self.assertEqual(te._import_rate_for_slot("2026-07-01T05:00:00", cosy, {}), 12.0)   # cheap slot
-        self.assertEqual(te._import_rate_for_slot("2026-07-01T17:00:00", cosy, {}), 38.0)   # peak
-        self.assertEqual(te._import_rate_for_slot("2026-07-01T09:00:00", cosy, {}), 26.0)   # shoulder
+        self.assertEqual(te._import_rate_for_slot("2026-07-01T05:00:00", cosy, {}), 11.9005)  # cheap slot
+        self.assertEqual(te._import_rate_for_slot("2026-07-01T17:00:00", cosy, {}), 36.3818)  # peak
+        self.assertEqual(te._import_rate_for_slot("2026-07-01T09:00:00", cosy, {}), 24.2514)  # shoulder
 
     def test_agile_cap_and_negative(self):
         ag = te.IMPORT_TARIFFS["agile"]   # cap_p = 100.0

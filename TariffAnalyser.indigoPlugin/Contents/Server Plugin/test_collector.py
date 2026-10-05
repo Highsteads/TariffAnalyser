@@ -33,35 +33,29 @@ import daily_collector as dc     # noqa: E402
 import octopus_prices as op      # noqa: E402
 
 
-class TestInWindow(unittest.TestCase):
+class TestPriceMeterSlots(unittest.TestCase):
+    """v1.12: Go and Flux priced per meter half-hour through tariff_engine's
+    RateBook — Octopus's prices when fetched, else the dated table (these
+    replace the old _apply_tou_* helpers and their 7.5/24 and 7.01/21/33p)."""
 
-    def test_daytime_half_open(self):
-        self.assertTrue(dc._in_window("02:00", "02:00", "05:00"))   # start inclusive
-        self.assertTrue(dc._in_window("04:30", "02:00", "05:00"))
-        self.assertFalse(dc._in_window("05:00", "02:00", "05:00"))  # end exclusive
-        self.assertFalse(dc._in_window("01:30", "02:00", "05:00"))
+    def test_table_prices_when_nothing_fetched(self):
+        import tariff_engine as te
+        book = te.RateBook({}, date(2026, 10, 5), date(2026, 10, 5))
+        go = dc._price_meter_slots(book, "go", te.IMPORT_TARIFFS["go"], "2026-10-05",
+                                   [("03:00", 1.0), ("12:00", 1.0)])
+        self.assertAlmostEqual(go, 8.2143 + 28.3072, places=4)
+        flux = dc._price_meter_slots(book, "flux", te.IMPORT_TARIFFS["flux"], "2026-10-05",
+                                     [("03:00", 1.0), ("17:00", 1.0), ("09:00", 1.0)])
+        self.assertAlmostEqual(flux, 13.9223 + 32.4761 + 23.1946, places=4)
 
-    def test_overnight_wrap(self):
-        self.assertTrue(dc._in_window("23:45", "23:30", "05:30"))
-        self.assertTrue(dc._in_window("00:00", "23:30", "05:30"))
-        self.assertFalse(dc._in_window("05:30", "23:30", "05:30"))
-        self.assertFalse(dc._in_window("12:00", "23:30", "05:30"))
-
-
-class TestApplyTou(unittest.TestCase):
-
-    def test_go_two_band(self):
-        # Go cheap 00:30-05:30 @7.5, peak @24. 1 kWh at 03:00 + 1 kWh at 12:00.
-        slots = [("03:00", 1.0), ("12:00", 1.0)]
-        total = dc._apply_tou_simple(slots, dc.GO_CHEAP_START, dc.GO_CHEAP_END,
-                                     dc.GO_CHEAP_P, dc.GO_PEAK_P)
-        self.assertAlmostEqual(total, 7.5 + 24.0, places=4)
-
-    def test_flux_three_band(self):
-        # off-peak 02:00-05:00, peak 16:00-19:00, shoulder otherwise.
-        slots = [("03:00", 1.0), ("17:00", 1.0), ("09:00", 1.0)]
-        total = dc._apply_tou_flux(slots, 7.01, 21.0, 33.0)
-        self.assertAlmostEqual(total, 7.01 + 33.0 + 21.0, places=4)
+    def test_fetched_prices_win(self):
+        import tariff_engine as te
+        s = te.local_epoch("2026-10-05T00:00:00")
+        book = te.RateBook({"flux": {"standard": [(s, s + 86400, 20.0)]}},
+                           date(2026, 10, 5), date(2026, 10, 5))
+        flux = dc._price_meter_slots(book, "flux", te.IMPORT_TARIFFS["flux"], "2026-10-05",
+                                     [("03:00", 1.0), ("17:00", 2.0)])
+        self.assertAlmostEqual(flux, 60.0, places=4)
 
 
 class TestGasConversion(unittest.TestCase):
@@ -172,7 +166,6 @@ class TestInstallDateSetting(unittest.TestCase):
         ds = "2026-02-01"
         stubs = {
             "_fetch_tracker_rates":       lambda *a, **k: {ds: 20.0},
-            "_fetch_flux_rates":          lambda *a, **k: {},
             "_fetch_octopus_consumption": lambda *a, **k: {},
             "_fetch_octopus_gas":         lambda *a, **k: {},
             "_aggregate_halfhourly":      lambda *a, **k: {ds: {
@@ -319,7 +312,7 @@ class TestOctopusStandingCharges(unittest.TestCase):
 
 class TestCollectorStandingCharges(unittest.TestCase):
 
-    def _run(self, history, live):
+    def _run(self, history, live, live_rates=None, exp_slots=None):
         import json
         import shutil
         import sqlite3
@@ -328,9 +321,9 @@ class TestCollectorStandingCharges(unittest.TestCase):
         slots = [("03:00", 1.0), ("12:00", 1.0)]
         stubs = {
             "_fetch_tracker_rates":       lambda *a, **k: {},
-            "_fetch_flux_rates":          lambda *a, **k: {},
             "_fetch_octopus_consumption": lambda api, mpan, *a, **k:
-                {d1: slots, d2: slots} if mpan == "import" else {},
+                {d1: slots, d2: slots} if mpan == "import" else (
+                    {d1: exp_slots} if (mpan == "export" and exp_slots) else {}),
             "_fetch_octopus_gas":         lambda *a, **k: {d1: 10.0, d2: 10.0},
             "_aggregate_halfhourly":      lambda *a, **k: {d: {
                 "pv_kwh": 0.0, "home_kwh": 2.0, "imp_kwh": 2.0, "exp_kwh": 0.0,
@@ -348,7 +341,8 @@ class TestCollectorStandingCharges(unittest.TestCase):
             dc.update_daily_summary(db, date(2026, 9, 20), date(2026, 9, 21),
                                     {"region": "F", "api_key": "k", "mpan": "import",
                                      "serial": "s", "timeseries_db": ts,
-                                     "live_standing": live})
+                                     "export_mpan": "export", "export_serial": "e",
+                                     "live_standing": live, "live_rates": live_rates})
             con = sqlite3.connect(db)
             con.row_factory = sqlite3.Row
             rows = {r["date"]: dict(r) for r in con.execute("SELECT * FROM daily_summary")}
@@ -369,10 +363,11 @@ class TestCollectorStandingCharges(unittest.TestCase):
         self.assertAlmostEqual(day1["elec_standing_charge_gbp"], 0.60, places=4)
         self.assertAlmostEqual(day1["elec_total_gbp"], (2 * 20.0 + 60.0) / 100, places=4)
         self.assertAlmostEqual(day1["gas_standing_charge_gbp"], 0.30, places=4)
-        # Go: 7.5 + 24 = 31.5p of energy. Saving = (40 + 60) - (31.5 + 70)
-        self.assertAlmostEqual(day1["go_saving_vs_tracker_gbp"], -0.015, places=4)
-        # Flux: 7.01 + 21 = 28.01p. Saving = (40 + 60) - (28.01 + 50)
-        self.assertAlmostEqual(day1["flux_saving_vs_tracker_gbp"], 0.2199, places=4)
+        # Go (table, no fetch): 8.2143 + 28.3072 = 36.5215p of energy.
+        # Saving = (40 + 60) - (36.5215 + 70)
+        self.assertAlmostEqual(day1["go_saving_vs_tracker_gbp"], -0.0652, places=4)
+        # Flux: 13.9223 + 23.1946 = 37.1169p. Saving = (40 + 60) - (37.1169 + 50)
+        self.assertAlmostEqual(day1["flux_saving_vs_tracker_gbp"], 0.1288, places=4)
         # day 2: nothing recorded, no Octopus figure -> the constants
         self.assertAlmostEqual(day2["elec_standing_charge_gbp"],
                                round(dc.ELEC_STANDING_P_DAY / 100, 4), places=4)
@@ -380,8 +375,25 @@ class TestCollectorStandingCharges(unittest.TestCase):
                                round(dc.GAS_STANDING_P_DAY / 100, 4), places=4)
         self.assertAlmostEqual(
             day2["go_saving_vs_tracker_gbp"],
-            round(((40 + dc.ELEC_STANDING_P_DAY) - (31.5 + dc.GO_STANDING_P_DAY)) / 100, 4),
+            round(((40 + dc.ELEC_STANDING_P_DAY) - (36.5215 + dc.GO_STANDING_P_DAY)) / 100, 4),
             places=4)
+
+    def test_live_prices_and_recorded_export_used(self):
+        import tariff_engine as te
+        s = te.local_epoch("2026-09-19T00:00:00")
+        rows = self._run(
+            [{"date": "2026-09-20", "elec_standing_p_day": 60.0, "export_rate_p": 25.0}],
+            {"flux": {"2026-09-20": 50.0}},
+            live_rates={"flux": {"standard": [(s, s + 5 * 86400, 20.0)]}},
+            exp_slots=[("17:00", 1.0)])
+        day1, day2 = rows["2026-09-20"], rows["2026-09-21"]
+        # actual export paid at the price recorded for the day, not 12p
+        self.assertAlmostEqual(day1["elec_export_revenue_gbp"], 0.25, places=4)
+        # Flux: 2 kWh at Octopus's 20p, export at Flux Export peak (table 27.6905p)
+        self.assertAlmostEqual(day1["flux_import_cost_gbp"], 0.40, places=4)
+        self.assertAlmostEqual(day1["flux_net_cost_gbp"], (40.0 - 27.6905) / 100, places=4)
+        # a day with no recorded export price and no export
+        self.assertAlmostEqual(day2["elec_export_revenue_gbp"], 0.0, places=4)
 
     def test_fallback_constants_are_octopus_region_f_figures(self):
         self.assertEqual(dc.GO_STANDING_P_DAY, 63.21819)

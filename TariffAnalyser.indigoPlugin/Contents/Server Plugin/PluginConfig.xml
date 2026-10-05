@@ -50,11 +50,15 @@
     <Field id="exportTariffKey" type="menu" defaultValue="outgoing_12p">
         <Label>Export tariff to use in comparisons</Label>
         <List>
-            <Option value="outgoing_12p">Octopus Outgoing 12p flat (actual)</Option>
+            <Option value="outgoing_12p">Octopus Outgoing 12p flat</Option>
             <Option value="agile_outgoing">Octopus Agile Outgoing (variable)</Option>
-            <Option value="seg_min">SEG Minimum (Ofgem floor - 1.63p)</Option>
-            <Option value="seg_typical">SEG Typical (7.5p)</Option>
+            <Option value="flux_export">Octopus Flux Export (banded)</Option>
+            <Option value="seg_min">SEG low rate (illustrative 1.63p)</Option>
+            <Option value="seg_typical">SEG typical rate (illustrative 7.5p)</Option>
         </List>
+    </Field>
+    <Field id="exportTariffHelp" type="label" fontSize="small" fontColor="darkgray">
+        <Label>Your actual-prices row is paid for export at the price SigenEnergyManager recorded for each day; this setting covers any day without one. Octopus Flux is always paired with Flux Export. Every other tariff uses this setting.</Label>
     </Field>
 
     <Field id="gasUnitRateP" type="textfield" defaultValue="6.09">

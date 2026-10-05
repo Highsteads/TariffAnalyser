@@ -2,7 +2,7 @@
 
 **See what your own half-hourly electricity use would have cost on ten UK tariffs, from inside Indigo.**
 
-**Version:** 1.11 | **Author:** CliveS & Claude | **Needs:** Indigo 2022.1 or later and SigenEnergyManager 4.6 or later
+**Version:** 1.12 | **Author:** CliveS & Claude | **Needs:** Indigo 2022.1 or later and SigenEnergyManager 4.6 or later
 
 **[Read the full guide](https://highsteads.github.io/TariffAnalyser/)** — setting up, what the reports show, and what to do when something goes wrong.
 
@@ -14,9 +14,9 @@ This plugin lets [Indigo](https://www.indigodomo.com) price the energy your hous
 
 - **Ranks the tariffs** — the prices you actually paid, named after the tariff you were on, against Octopus Go, Agile, Cosy and Flux, Economy 7, the Ofgem price cap, and typical fixed deals from E.ON Next, EDF and Scottish Power — by what the last 7 to 365 days would have cost you on each, with a month-by-month breakdown.
 - **Compares them fairly.** Every tariff is priced over the same half-hours, with the standing charge for those half-hours only, so a tariff with gaps in its prices cannot come out cheapest just because some of your use was never counted.
-- **Prices your exports** at Octopus Outgoing 12p, Agile Outgoing, or the Smart Export Guarantee minimum or typical rate, whichever you choose.
-- **Shows what your solar has saved** today, yesterday, this week, this month and this year, with a projection for a whole year.
-- **Fetches Agile prices by itself** from Octopus's public price list, which needs no account.
+- **Uses Octopus's real prices** for Agile, Go, Cosy, Flux and Economy 7, fetched for your region from Octopus's public price list, which needs no account.
+- **Prices your exports** at what you were really paid each day for your own tariff, at Flux Export for Flux, and at Octopus Outgoing 12p, Agile Outgoing, Flux Export or an illustrative Smart Export Guarantee rate, whichever you choose, for the rest.
+- **Shows what your solar has saved** today, yesterday, this week, this month and this year, with a projection for a whole year, and keeps the saving from charging the battery off the grid in the cheap hours separate from the solar saving.
 - **Runs from a schedule** as well as the Plugins menu, so a report can be ready each morning.
 - **Collects your Octopus meter readings each night** at 2am, if you give it your Octopus details, and keeps one line per day, gas included, in the energy database.
 
@@ -39,6 +39,8 @@ It needs [SigenEnergyManager](https://github.com/Highsteads/SigenEnergyManager) 
 The [full guide](https://highsteads.github.io/TariffAnalyser/) goes through each step, explains every setting and every figure in the reports, and covers what to do if something does not work.
 
 ## What's new
+
+**v1.12** — Octopus Flux, Go, Cosy and Economy 7 use the prices Octopus published for your region instead of figures typed in last May, which had Flux's cheap rate at half its real price. Flux is paired with Flux Export, your own row is paid for export at what you really earned each day, and Agile is priced at last, where before it always showed as short of prices. The Energy Summary no longer counts battery energy bought from the grid as solar saving: it shows it on its own line as time-shifting.
 
 **v1.11** — The standing charges are the real ones. The row for the prices you paid uses the standing charge SigenEnergyManager recorded for each day, and Octopus Go, Agile, Cosy and Flux use the figure Octopus publishes for your region, where before they all shared one made-up 53.35p a day. Go Faster is gone from the comparison, because Octopus no longer sells it, and the nightly collection uses the same figures and your **Timeseries DB path** setting.
 

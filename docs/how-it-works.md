@@ -11,7 +11,9 @@ You do not need to know any of this to use the plugin. It is here for anyone who
 
 SigenEnergyManager writes a line to its energy database every half hour: what the house bought from the grid, sold to it, made from the panels and used, and the price you paid for that half-hour on whatever tariff you were on. Tariff Analyser reads those lines. It never talks to the inverter or the battery itself, and it changes nothing in your system.
 
-For each tariff, it takes every half-hour in the period, works out that tariff's price for that half-hour, and multiplies it by what you bought. It does the same for what you sold, at your chosen export price, then adds the standing charge.
+For each tariff, it takes every half-hour in the period, works out that tariff's price for that half-hour, and multiplies it by what you bought. It does the same for what you sold, at that tariff's export price, then adds the standing charge.
+
+SigenEnergyManager's half-hours do not start exactly on the hour or half hour — 10:04pm to 10:34pm is typical — while prices change at :00 and :30. So the plugin splits each half-hour between the prices it spans, in proportion to time. A record from 3:56pm to 4:26pm on Flux is four minutes at the day rate and twenty-six at the peak rate. That assumes the energy was used evenly through the record, which is close enough for a comparison. A record that spans a moment with no price is left unpriced, never counted at 0p.
 
 SigenEnergyManager also keeps a line for each day, with the standing charge you paid that day. The row for your own tariff uses that. For the Octopus tariffs the plugin fetches the standing charge Octopus publishes for your region, with the dates each figure applies, so each day is charged at the figure in force that day. The [tariffs page](tariffs.md) says what happens when a figure is missing.
 
@@ -26,7 +28,7 @@ If each tariff were simply added up over the half-hours it has prices for, a tar
 
 ## Agile prices
 
-Octopus publishes Agile prices on its public price list, which needs no account or key. The plugin finds the current Agile tariff for your region, fetches the prices for the half-hours it does not already have, and keeps them in a small database in its own folder inside Indigo's Preferences folder. The standing charges for Go, Agile, Cosy and Flux come from the same list and go in the same database, fetched again at most once a day. A published Agile price never changes, so a price once saved is kept, and later reports only fetch what is new.
+Octopus publishes Agile prices on its public price list, which needs no account or key. The plugin finds the current Agile tariff for your region, fetches the prices for the half-hours it does not already have, and keeps them in a small database in its own folder inside Indigo's Preferences folder. The unit prices for Go, Cosy, Flux, Economy 7 and Flux Export, and the standing charges for every Octopus tariff, come from the same list and go in the same database, fetched again at most once a day. A published Agile price never changes, so a price once saved is kept, and later reports only fetch what is new.
 
 Every comparison, from the Plugins menu or the **Generate Tariff Comparison Report** action, first checks the saved Agile prices cover its period and fetches any that are missing. If Octopus cannot be reached, the Event Log says so and the comparison uses the prices already saved. Nothing fetches Agile prices at night, so a comparison over a long period may take a moment the first time.
 
@@ -36,7 +38,7 @@ If the plugin has an Octopus API key, then at 2am each night it collects the las
 
 - the day's energy from SigenEnergyManager's half-hourly record
 - the readings from your Octopus meters, where you have given the plugin their details
-- the day's cost at the prices you paid, and what it would have been on Go and Flux, each with its own standing charge for that day
+- the day's cost at the prices you paid, with your export at the price SigenEnergyManager recorded for that day, and what it would have been on Go and Flux at Octopus's prices for each half-hour, each with its own standing charge for that day (Flux sells its export at Flux Export prices when your export meter's readings are there)
 - the saving your solar made that day, counted from the **Solar install date** if you have set one
 - your gas use and its cost, if you have given it your gas meter's details, with the gas standing charge SigenEnergyManager recorded
 
@@ -47,3 +49,9 @@ The two reports do not use this daily summary. It is there for anything else tha
 Each comparison writes a short table of the ranking to the Indigo Event Log, along with the totals and where the report was saved. The nightly collection says when it starts and finishes, and a warning appears if it cannot find the energy database or an Octopus API key.
 
 Every line the plugin writes starts with the time to the thousandth of a second, which helps when lining up events with other plugins. **Toggle Timestamps in Log (on/off)** in the plugin menu turns that off or on.
+
+## How the Energy Summary splits the saving
+
+The total saved is what the house's use would have cost if you had bought every unit from the grid, with no solar and no battery, minus what you actually paid. Part of that is not solar at all: on a tariff such as Flux the battery charges from the grid in the cheap hours and the house uses that energy, or sells it, when electricity is dear. So the plugin keeps track of what is in the battery as two parts, solar and grid. Charge from solar the house did not need goes into the solar part; charge while the house is importing goes into the grid part; each discharge takes from both in proportion; and after each half-hour both are scaled to the battery's real state of charge, so losses come out of both. Only the solar part counts as solar saving. The grid part is shown as **time-shifting**: what that energy was worth when it was used or sold, less what it cost to buy.
+
+The plugin starts tracking two days before each period, so the mix is already realistic on the first day.
