@@ -3,9 +3,9 @@
 # Filename:    tariff_engine.py
 # Description: Tariff comparison engine - applies UK energy tariff pricing
 #              to half-hourly energy flow data from energy_timeseries.db
-# Author:      CliveS & Claude Opus 5.5
-# Date:        05-10-2026
-# Version:     1.1
+# Author:      CliveS & Codex
+# Date:        26-10-2026 15:40 UK
+# Version:     1.2
 
 import json
 import os
@@ -281,10 +281,14 @@ SLOT_SECONDS = 1800
 
 
 def local_epoch(ts):
-    """Epoch seconds for a UK wall-clock 'YYYY-MM-DDTHH:MM:SS' string. In the
-    hour the clocks go back, a time that happens twice is taken as the first."""
-    return datetime.strptime(str(ts)[:19], "%Y-%m-%dT%H:%M:%S").replace(
-        tzinfo=UK_TZ).timestamp()
+    """Epoch seconds, preserving an explicit UTC offset when supplied.
+    Legacy UK wall-clock times use the first occurrence of a repeated hour;
+    run_comparison reports that ambiguity rather than claiming exact timing.
+    """
+    value = datetime.fromisoformat(str(ts))
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UK_TZ)
+    return value.timestamp()
 
 
 def _row_span(slot_start, slot_end):
@@ -298,6 +302,44 @@ def _row_span(slot_start, slot_end):
     if e <= s:
         e = s + SLOT_SECONDS
     return s, e
+
+
+def covered_day_fractions(spans, date_from, date_to):
+    """Union of covered seconds per UK calendar day, divided by that day's
+    real length. Handles 23/25-hour days, gaps, drift and overlapping rows.
+    This affects standing only; stored energy is never rewritten or split.
+    """
+    intervals = sorted((s, e) for s, e in spans if e > s)
+    merged = []
+    for s, e in intervals:
+        if merged and s <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(e, merged[-1][1]))
+        else:
+            merged.append((s, e))
+    fractions = {}
+    day = date_from
+    while day <= date_to:
+        a, b = _band_epochs(day, "00:00", "24:00")
+        seconds = sum(max(0.0, min(e, b) - max(s, a)) for s, e in merged)
+        if seconds:
+            fractions[day.isoformat()] = min(1.0, seconds / (b - a))
+        day += timedelta(days=1)
+    return fractions
+
+
+def ambiguous_local_time(ts):
+    """A legacy timestamp without an offset cannot distinguish the repeated
+    autumn hour (or a non-existent spring time). Surface that uncertainty.
+    """
+    if not ts:
+        return False
+    try:
+        value = datetime.fromisoformat(str(ts))
+    except (TypeError, ValueError):
+        return False
+    return (value.tzinfo is None and
+            value.replace(tzinfo=UK_TZ, fold=0).utcoffset() !=
+            value.replace(tzinfo=UK_TZ, fold=1).utcoffset())
 
 
 class PriceTimeline:
@@ -598,7 +640,8 @@ def run_comparison(
         return book.rate(ekey, EXPORT_TARIFFS[ekey], s, e, "export")
 
     # --- Pass 1: resolve every tariff's per-slot rates and count own coverage ---
-    slot_rates = []   # [(slot_start, imp_kwh, exp_kwh, {key: (imp_rate, exp_rate)}), ...]
+    slot_rates = []   # Keep spans beside rates for calendar-day standing.
+    ambiguous_rows = 0
     raw_valid  = {k: 0 for k in import_tariff_keys}
     rate_sources   = {k: Counter() for k in import_tariff_keys}
     export_sources = {k: Counter() for k in import_tariff_keys}
@@ -617,6 +660,7 @@ def run_comparison(
         totals["pv_kwh"]          += pv_kwh  or 0.0
         totals["home_kwh"]        += home_kwh or 0.0
         s, e = _row_span(slot_start, slot_end)
+        ambiguous_rows += bool(ambiguous_local_time(slot_start) or ambiguous_local_time(slot_end))
         day  = slot_start[:10]
 
         rates = {}
@@ -643,7 +687,7 @@ def run_comparison(
             rate_sources[key][src] += 1
             if (exp_kwh or 0.0) > 0 and esrc:
                 export_sources[key][esrc] += 1
-        slot_rates.append((slot_start, imp_kwh, exp_kwh, rates))
+        slot_rates.append((slot_start, imp_kwh, exp_kwh, rates, s, e))
 
     total_slots = len(rows)
 
@@ -668,9 +712,9 @@ def run_comparison(
     acc   = {k: {"import_p": 0.0, "export_p": 0.0} for k in ranked_keys}
     monthly        = {}   # {month_str: {tariff_key: net_energy_cost_p}} (common slots)
     monthly_common = {}   # {month_str: common_slot_count}
-    common_by_day  = Counter()   # {date_str: common_slot_count}, for standing
+    common_spans = []
     common_slots   = 0
-    for (slot_start, imp_kwh, exp_kwh, rates) in slot_rates:
+    for (slot_start, imp_kwh, exp_kwh, rates, s, e) in slot_rates:
         month_str = slot_start[:7]
         monthly.setdefault(month_str, {k: 0.0 for k in ranked_keys})
         monthly_common.setdefault(month_str, 0)
@@ -678,7 +722,7 @@ def run_comparison(
             continue
         common_slots += 1
         monthly_common[month_str] += 1
-        common_by_day[slot_start[:10]] += 1
+        common_spans.append((s, e))
         for key in ranked_keys:
             imp_rate, exp_rate = rates[key]
             cost    = (imp_kwh or 0.0) * imp_rate
@@ -689,9 +733,13 @@ def run_comparison(
 
     coverage_pct  = round(common_slots / total_slots * 100.0, 1) if total_slots else 0.0
 
-    # Standing is charged per PRICED half-hour (1 slot = 1/48 of a day) so unit
-    # cost and standing sit on the same slot basis as the common comparison,
-    # each half-hour at the figure for its own day.
+    # A daily charge belongs to a calendar day, whose elapsed length varies
+    # at the clock changes. Charge only the union of the priced intervals.
+    day_fractions = covered_day_fractions(common_spans, date_from, date_to)
+    data_fractions = covered_day_fractions(
+        [(r[-2], r[-1]) for r in slot_rates], date_from, date_to)
+    if not common_slots:
+        ranked_keys = []  # disjoint price coverage must never rank zero-cost rows
     recorded_name = clean_tariff_name(current_tariff_name)
     name_fits     = bool(recorded_name) and recorded_label == f"{recorded_name} (actual)"
     recorded_live = live_standing.get(live_standing_key(recorded_name), {}) if name_fits else {}
@@ -702,7 +750,7 @@ def run_comparison(
         table_p = IMPORT_TARIFFS[key].get("standing_p_day", 0.0)
         live    = recorded_live if key == "tracker" else live_standing.get(key, {})
         total, used = 0.0, set()
-        for day in sorted(common_by_day):
+        for day in sorted(day_fractions):
             p = recorded_standing.get(day) if key == "tracker" else None
             if p is not None:
                 used.add("recorded")
@@ -715,7 +763,7 @@ def run_comparison(
                 else:
                     p = table_p
                     used.add("table")
-            total += p * common_by_day[day] / 48.0
+            total += p * day_fractions[day]
         standing_by_key[key]  = total
         standing_sources[key] = sorted(used)
 
@@ -763,7 +811,17 @@ def run_comparison(
             "insufficient_data": True,
         })
 
+    for result in results:
+        illustrative = IMPORT_TARIFFS[result["tariff_key"]]["type"] == "fixed"
+        result["illustrative"] = illustrative
+        result["ranking_eligible"] = not illustrative and not result["insufficient_data"]
+
     return {
+        "standing_day_fractions": day_fractions,
+        "data_coverage_pct": round(sum(data_fractions.values()) / days * 100, 1),
+        "priced_time_coverage_pct": round(sum(day_fractions.values()) / days * 100, 1),
+        "ambiguous_time_rows": ambiguous_rows,
+        "comparison_basis": "recorded_flows",
         "slots":          total_slots,
         "common_slots":   common_slots,
         "coverage_pct":   coverage_pct,

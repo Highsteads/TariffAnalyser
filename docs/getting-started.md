@@ -41,7 +41,7 @@ The plugin fetches any Agile prices it does not already have, prices every tarif
 
 ## 4. Check it works
 
-The report opens with your energy totals at the top and the tariffs ranked cheapest first. The Indigo Event Log has the same ranking in a short table, and a line saying where the report was saved.
+The report opens with your energy totals at the top and non-illustrative tariffs in modelled-cost order, followed by unranked illustrative examples. Battery operation is held unchanged; this is not a tariff-switch recommendation. The Indigo Event Log has the same ranking in a short table, and a line saying where the report was saved.
 
 Now choose **Plugins → Tariff Analyser → Energy Summary (today / yesterday / week / month / year)** to see what your solar has saved.
 

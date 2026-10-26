@@ -9,7 +9,7 @@ The plugin makes two reports. Each is a web page, saved in the output folder and
 
 ## The Tariff Comparison
 
-This answers "which tariff would have been cheapest for the way my house really uses energy?" It covers the period you choose, ending yesterday.
+This shows what the same recorded imports and exports would cost at different prices. It does not simulate a different battery schedule or recommend a tariff switch. It covers the period you choose, ending yesterday.
 
 ### The top of the page
 
@@ -21,11 +21,10 @@ The first lines give the dates, the number of days, the number of half-hours wit
 | **Grid export** | The electricity you sold to the grid. |
 | **Solar generated** | What your panels made. |
 | **Home load** | What the house used. |
-| **Self-sufficiency** | How much of what the house used did not come from the grid, as a percentage. |
 
 ### The tariff ranking
 
-Each tariff has one row, cheapest at the top, marked ★, and dearest at the bottom, marked ✘.
+Non-illustrative tariffs appear in cost order, with the lowest modelled cost marked by a star. Illustrative fixed-supplier and price-cap examples follow without a rank. If no priced intervals are shared, no tariff is ranked.
 
 | Column | What it means |
 |---|---|
@@ -34,7 +33,7 @@ Each tariff has one row, cheapest at the top, marked ★, and dearest at the bot
 | **Export** | What the electricity you sold would have earned on that tariff. Your own row uses the export price recorded for each day, Flux uses Flux Export, and the rest use the export tariff chosen in the settings. |
 | **Standing** | The standing charge for the period, day by day. |
 | **vs actual** | How much cheaper or dearer the tariff is than the row for the prices you actually paid, which is marked **current** and named after the tariff you were on, such as **Octopus Flux (actual)**. |
-| **Coverage** | How much of the period that tariff has a price for. |
+| **Coverage** | How many of the stored readings have a price for this tariff. A separate note gives the calendar coverage of the readings themselves. |
 
 A tariff with a price for less than half the period is not ranked. It appears greyed out below the others, marked **insufficient price data to rank**, with its coverage. This is usually Agile when its prices have not been fetched yet.
 
@@ -44,13 +43,13 @@ If any tariff has gaps, a note above the table says what share of the period eve
 
 ### The monthly breakdown
 
-A second table gives the cost of energy on each tariff month by month, with the cheapest tariff each month highlighted. It leaves out standing charges, so it shows the difference the prices make on their own. A month with no half-hours that every tariff has a price for shows **no data**.
+A second table gives the cost of energy on each non-illustrative tariff month by month, with the cheapest tariff each month highlighted. It leaves out standing charges, so it shows the difference the prices make on their own. A month with no half-hours that every tariff has a price for shows **no data**.
 
 ### The notes
 
 The last section sets out the terms of the comparison: every tariff is given the same pattern of use; Agile, Go, Cosy, Flux and Economy 7 use Octopus's published prices, and if any half-hours had to use the plugin's own prices it says which tariff and the date of those prices; the Ofgem cap and fixed deals use typical prices with the date they were last checked; which export price each row used; how a half-hour that spans a price change is split; where each tariff's standing charge came from, including any days SigenEnergyManager had no figure for; and that all costs include VAT at 5%.
 
-Because every tariff is given the same pattern of use, a tariff with a cheap night rate may do better in real life than the report shows, since you would likely charge the battery in the cheap hours.
+Because every tariff is given the same pattern of use, a tariff with a cheap night rate may do better in real life than the report shows, since you would likely charge the battery in the cheap hours. That could change the order of the tariffs. Intervals crossing a price boundary are estimates, especially during deliberate charging or export.
 
 The file is named after the dates and the time it was made, such as `tariff_comparison_2026-08-27_2026-09-25_20260926_081500.html`, so each report is kept.
 

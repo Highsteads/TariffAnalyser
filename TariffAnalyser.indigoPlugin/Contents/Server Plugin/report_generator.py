@@ -3,9 +3,9 @@
 # Filename:    report_generator.py
 # Description: Generates HTML tariff comparison + savings reports and opens
 #              them in the default browser.  CSV output was removed in v1.2.
-# Author:      CliveS & Claude Opus 5.5
-# Date:        05-10-2026
-# Version:     1.3
+# Author:      CliveS & Codex
+# Date:        26-10-2026 15:40 UK
+# Version:     1.4
 
 import os
 import subprocess
@@ -228,10 +228,11 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
     insufficient   = [r for r in results if r.get("insufficient_data")]
 
     tracker_row = next((r for r in ranked_results if r["tariff_key"] == "tracker"), None)
-    baseline    = tracker_row["total_cost_p"] if tracker_row else 0.0
+    baseline    = tracker_row["total_cost_p"] if tracker_row else None
 
     # engine already returns ranked_results cheapest-first; keep that order
-    ranked = ranked_results
+    ranked = [r for r in ranked_results if r.get("ranking_eligible", True)]
+    illustrative = [r for r in ranked_results if not r.get("ranking_eligible", True)]
 
     def gbp(pence):
         return f"£{pence / 100.0:.2f}"
@@ -243,22 +244,27 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
 
     # --- summary rows ---------------------------------------------------
     summary_rows = []
-    for i, r in enumerate(ranked, 1):
-        vs_tracker_p = r["total_cost_p"] - baseline
+    for i, r in enumerate(ranked + illustrative, 1):
+        vs_tracker_p = r["total_cost_p"] - baseline if baseline is not None else None
         if r["tariff_key"] == "tracker":
             vs = '<span class="vs current">current</span>'
+        elif vs_tracker_p is None:
+            vs = '<span class="vs">actual cost unavailable</span>'
         elif vs_tracker_p < 0:
             vs = f'<span class="vs cheaper">cheaper by {gbp(-vs_tracker_p)}</span>'
         elif vs_tracker_p > 0:
             vs = f'<span class="vs dearer">more by {gbp(vs_tracker_p)}</span>'
         else:
             vs = '<span class="vs">same</span>'
-        rank_class = " rank-best" if i == 1 else (" rank-worst" if i == len(ranked) else "")
-        marker = " ★" if i == 1 else (" ✘" if i == len(ranked) else "")
+        eligible = r.get("ranking_eligible", True)
+        rank_class = " rank-best" if eligible and i == 1 else ""
+        marker = " ★" if eligible and i == 1 else ""
+        rank_label = f"{i}{marker}" if eligible else "Example"
+        row_name = r['tariff_name'] + (" (illustrative, not ranked)" if not eligible else "")
         summary_rows.append(f"""
         <tr class="rank-row{rank_class}">
-          <td class="rank">{i}{marker}</td>
-          <td class="name">{r['tariff_name']}</td>
+          <td class="rank">{rank_label}</td>
+          <td class="name">{row_name}</td>
           <td class="cost total">{gbp(r['total_cost_p'])}</td>
           <td class="cost">{gbp(r['import_cost_p'])}</td>
           <td class="cost">{gbp(r['export_revenue_p'])}</td>
@@ -298,11 +304,21 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
     if actual_note:
         coverage_note += f'<p class="note warn">{actual_note}</p>'
 
+    data_coverage = comparison.get("data_coverage_pct")
+    if data_coverage is not None:
+        coverage_note += (f'<p class="note">Recorded intervals cover {data_coverage:.1f}% '
+                          'of the requested calendar days. Price coverage is measured '
+                          'against those records, not against missing readings.</p>')
+    if comparison.get("ambiguous_time_rows", 0):
+        coverage_note += ('<p class="note warn">Some records fall in the clock-change '
+                          'hour without a UTC offset. Their exact timing cannot be '
+                          'recovered from this data; treat the costs as estimates.</p>')
+
     # --- monthly breakdown ----------------------------------------------
     monthly_html = ""
-    if monthly:
-        tariff_keys  = [r["tariff_key"]  for r in ranked_results]
-        tariff_names = [r["tariff_name"] for r in ranked_results]
+    if monthly and ranked:
+        tariff_keys  = [r["tariff_key"]  for r in ranked]
+        tariff_names = [r["tariff_name"] for r in ranked]
         header_cells = "".join(f"<th>{n}</th>" for n in tariff_names)
         rows = []
         for month in sorted(monthly.keys()):
@@ -339,10 +355,7 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
 
     # --- energy totals ---------------------------------------------------
     home_kwh = totals.get("home_kwh", 0) or 0
-    self_suff_str = ""
-    if home_kwh > 0:
-        self_suff = (1.0 - totals.get("grid_import_kwh", 0) / home_kwh) * 100.0
-        self_suff_str = f'<div class="totalrow"><span>Self-sufficiency</span><span>{self_suff:.1f}%</span></div>'
+    self_suff_str = ""  # Grid import includes battery charging, not just home supply.
 
     standing_html = "\n    ".join(f"<li>{n}</li>" for n in standing_notes(comparison, actual_label))
     rates_html    = "\n    ".join(f"<li>{n}</li>" for n in rate_notes(comparison))
@@ -407,8 +420,15 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
     {self_suff_str}
   </div>
 
-  <h2>Tariff ranking</h2>
-  <p class="note">★ cheapest, ✘ most expensive.  Cost = import - export + standing charges.  Compared against the prices you actually paid ({actual_label}).</p>
+  <h2>Costs with the same recorded electricity flows</h2>
+  <p class="note warn">This re-prices what the house actually imported and exported.
+  It does not simulate how the battery would charge or discharge on another tariff,
+  so the lowest figure is not a recommendation to switch. Eligibility and export
+  compatibility must also be checked before choosing a tariff.</p>
+  <p class="note">Intervals crossing a price change assume energy flowed evenly.
+  Deliberate charging or export at a tariff boundary can make that estimate inaccurate.
+  The original records do not contain enough detail to recover the exact split.</p>
+  <p class="note">★ lowest modelled cost among non-illustrative rows. Illustrative examples are not ranked. Cost = import - export + standing charges.  Compared against the prices you actually paid ({actual_label}).</p>
   {coverage_note}
   <table>
     <thead>
@@ -430,7 +450,7 @@ def generate_report(comparison, date_from, date_to, output_dir, export_tariff_na
 
   <h2>Notes</h2>
   <ul class="notes">
-    <li>Comparison assumes identical energy consumption patterns across all tariffs.  Real savings on time-of-use tariffs (Go, Cosy, Flux, Agile) may be higher because battery dispatch would be optimised for cheap windows.</li>
+    <li>Battery operation is held unchanged. A different battery schedule could change the order of the tariffs; this report does not predict that outcome.</li>
     <li>Every tariff is priced over the same set of half-hourly slots — those where all selected tariffs had a price — so the ranking is like-for-like.  The Coverage column shows each tariff's own data availability; when it is below 100% the £ totals are for the covered portion of the period.</li>
     <li>{actual_label} uses the prices SigenEnergyManager recorded for each half-hour, and Agile uses Octopus's published prices.  The Ofgem cap and the fixed suppliers use illustrative "typical" unit prices last checked {_uk_date(tariff_engine.REFERENCE_RATES_UPDATED)} — treat them as a guide, not your exact contract.</li>
     {rates_html}

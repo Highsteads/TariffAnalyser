@@ -2,7 +2,7 @@
 
 **See what your own half-hourly electricity use would have cost on ten UK tariffs, from inside Indigo.**
 
-**Version:** 1.12 | **Author:** CliveS & Claude | **Needs:** Indigo 2022.1 or later and SigenEnergyManager 4.6 or later
+**Version:** 1.13 | **Author:** CliveS & Claude | **Needs:** Indigo 2022.1 or later and SigenEnergyManager 4.6 or later
 
 **[Read the full guide](https://highsteads.github.io/TariffAnalyser/)** — setting up, what the reports show, and what to do when something goes wrong.
 
@@ -12,8 +12,8 @@
 
 This plugin lets [Indigo](https://www.indigodomo.com) price the energy your house really bought, sold and made, half an hour at a time, on each of ten UK tariffs, and shows you the answer as a web page in your browser. It reads the record of your home's energy that my [SigenEnergyManager](https://github.com/Highsteads/SigenEnergyManager) plugin keeps for a Sigenergy solar and battery system.
 
-- **Ranks the tariffs** — the prices you actually paid, named after the tariff you were on, against Octopus Go, Agile, Cosy and Flux, Economy 7, the Ofgem price cap, and typical fixed deals from E.ON Next, EDF and Scottish Power — by what the last 7 to 365 days would have cost you on each, with a month-by-month breakdown.
-- **Compares them fairly.** Every tariff is priced over the same half-hours, with the standing charge for those half-hours only, so a tariff with gaps in its prices cannot come out cheapest just because some of your use was never counted.
+- **Compares recorded electricity flows** — the prices you actually paid, named after the tariff you were on, against Octopus Go, Agile, Cosy and Flux, Economy 7, the Ofgem price cap, and typical fixed deals from E.ON Next, EDF and Scottish Power — over the last 7 to 365 days, with a month-by-month breakdown. Illustrative prices remain visible but are not ranked. Battery operation is held unchanged, so this is not a recommendation to switch tariffs.
+- **Compares them fairly.** Every tariff is priced over the same half-hours, with standing charges for the covered share of each calendar day, including clock changes, so a tariff with gaps in its prices cannot come out cheapest just because some of your use was never counted.
 - **Uses Octopus's real prices** for Agile, Go, Cosy, Flux and Economy 7, fetched for your region from Octopus's public price list, which needs no account.
 - **Prices your exports** at what you were really paid each day for your own tariff, at Flux Export for Flux, and at Octopus Outgoing 12p, Agile Outgoing, Flux Export or an illustrative Smart Export Guarantee rate, whichever you choose, for the rest.
 - **Shows what your solar has saved** today, yesterday, this week, this month and this year, with a projection for a whole year, and keeps the saving from charging the battery off the grid in the cheap hours separate from the solar saving.
@@ -39,6 +39,8 @@ It needs [SigenEnergyManager](https://github.com/Highsteads/SigenEnergyManager) 
 The [full guide](https://highsteads.github.io/TariffAnalyser/) goes through each step, explains every setting and every figure in the reports, and covers what to do if something does not work.
 
 ## What's new
+
+**v1.13** — Standing charges follow the covered time in each UK calendar day, including clock changes and irregular intervals. Illustrative prices are shown without a rank. Reports distinguish missing readings from missing prices and warn about ambiguous timestamps and unchanged battery operation. Existing actions, settings and shared daily summaries stay compatible.
 
 **v1.12** — Octopus Flux, Go, Cosy and Economy 7 use the prices Octopus published for your region instead of figures typed in last May, which had Flux's cheap rate at half its real price. Flux is paired with Flux Export, your own row is paid for export at what you really earned each day, and Agile is priced at last, where before it always showed as short of prices. The Energy Summary no longer counts battery energy bought from the grid as solar saving: it shows it on its own line as time-shifting.
 

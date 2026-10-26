@@ -13,15 +13,21 @@ SigenEnergyManager writes a line to its energy database every half hour: what th
 
 For each tariff, it takes every half-hour in the period, works out that tariff's price for that half-hour, and multiplies it by what you bought. It does the same for what you sold, at that tariff's export price, then adds the standing charge.
 
-SigenEnergyManager's half-hours do not start exactly on the hour or half hour — 10:04pm to 10:34pm is typical — while prices change at :00 and :30. So the plugin splits each half-hour between the prices it spans, in proportion to time. A record from 3:56pm to 4:26pm on Flux is four minutes at the day rate and twenty-six at the peak rate. That assumes the energy was used evenly through the record, which is close enough for a comparison. A record that spans a moment with no price is left unpriced, never counted at 0p.
+SigenEnergyManager's half-hours do not start exactly on the hour or half hour — 10:04pm to 10:34pm is typical — while prices change at :00 and :30. So the plugin splits each half-hour between the prices it spans, in proportion to time. A record from 3:56pm to 4:26pm on Flux is four minutes at the day rate and twenty-six at the peak rate. That assumes the energy was used evenly through the record, which can be inaccurate when charging or export deliberately changes at the price boundary. A record that spans a moment with no price is left unpriced, never counted at 0p.
 
 SigenEnergyManager also keeps a line for each day, with the standing charge you paid that day. The row for your own tariff uses that. For the Octopus tariffs the plugin fetches the standing charge Octopus publishes for your region, with the dates each figure applies, so each day is charged at the figure in force that day. The [tariffs page](tariffs.md) says what happens when a figure is missing.
+
+## What this comparison can tell you
+
+Battery operation stays exactly as recorded. The report does not simulate a new charging schedule for another tariff, so its lowest figure is not a recommendation to switch. Illustrative supplier prices are kept as examples, outside the ranking.
+
+The report separately shows how much of the requested calendar period has readings. Price coverage refers only to those readings. Timestamps without a UTC offset in the repeated autumn hour cannot distinguish its two occurrences; the report warns when such records are present.
 
 ## Keeping the comparison fair
 
 A tariff can only be priced for a half-hour if the plugin has a price for it. Agile prices might not have been fetched for part of the period, and SigenEnergyManager might not have recorded a price for a half-hour.
 
-If each tariff were simply added up over the half-hours it has prices for, a tariff with gaps would look cheaper, because some of your use would never be counted. So the plugin prices every tariff over the same half-hours — the ones where every ranked tariff has a price — and charges the standing charge for those half-hours only, a forty-eighth of a day each.
+If each tariff were simply added up over the half-hours it has prices for, a tariff with gaps would look cheaper, because some of your use would never be counted. So the plugin prices every tariff over the same half-hours — the ones where every ranked tariff has a price — and charges standing for the covered time within each UK calendar day. A day may have 23, 24 or 25 hours. Overlapping intervals count only once; gaps do not count. A complete day costs one daily charge.
 
 - A tariff with prices for less than half the period is left out of the ranking and shown below it as **insufficient price data to rank**, so one tariff with few prices cannot shrink the comparison for all the others.
 - When the half-hours compared are less than the whole period, the report says so and gives the share, and each tariff's **Coverage** column shows how much of the period it had prices for on its own.

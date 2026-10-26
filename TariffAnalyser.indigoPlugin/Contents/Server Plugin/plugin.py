@@ -4,9 +4,14 @@
 # Description: TariffAnalyser - compares UK energy tariffs against recorded
 #              half-hourly energy data from SigenEnergyManager.
 #              Outputs HTML reports that open in the default browser.
-# Author:      CliveS & Claude Opus 5.5
-# Date:        05-10-2026
-# Version:     1.12
+# Author:      CliveS & Codex
+# Date:        26-10-2026 15:40 UK
+# Version:     1.13
+#
+# v1.13 (26-10-2026): Calendar-day standing and clearer comparison limits.
+# * Standing uses covered elapsed time within each 23/24/25-hour UK day.
+# * Illustrative prices are shown unranked; missing and ambiguous data is visible.
+# * Existing actions, preferences, database schema and result keys are preserved.
 #
 # v1.12 (05-10-2026): OCTOPUS'S REAL PRICES, REAL EXPORT, PRICING BY OVERLAP.
 # * Flux, Go, Cosy and Economy 7 (now Octopus Flexible on a two-rate meter)
@@ -898,19 +903,24 @@ class Plugin(indigo.PluginBase):
 
         ranked      = [r for r in results if not r.get("insufficient_data")]
         tracker_row = next((r for r in ranked if r["tariff_key"] == "tracker"), None)
-        baseline_p  = tracker_row["total_cost_p"] if tracker_row else 0.0
+        baseline_p  = tracker_row["total_cost_p"] if tracker_row else None
 
         log(f"[Compare] {date_from} to {date_to} | {days} days | {slots} slots")
         log(f"[Compare] Import: {totals.get('grid_import_kwh', 0):.1f} kWh  "
             f"Export: {totals.get('grid_export_kwh', 0):.1f} kWh  "
             f"PV: {totals.get('pv_kwh', 0):.1f} kWh")
+        log("[Compare] Costs hold battery operation unchanged; this is not a tariff-switch recommendation.")
+        if comparison.get("ambiguous_time_rows"):
+            log("[Compare] Clock-change records lack UTC offsets; costs are estimates.", level="WARNING")
         log(f"[Compare] {'Tariff':<35} {'Cost':>8}  {'vs actual':>12}  {'Cover':>6}")
         log(f"[Compare] {'-'*65}")
         for r in ranked:
             total_gbp  = r["total_cost_p"] / 100.0
-            diff_gbp   = (r["total_cost_p"] - baseline_p) / 100.0
-            diff_str   = f"{diff_gbp:+.2f}"
-            marker     = " <<" if r["tariff_key"] == "tracker" else ""
+            diff_str = (f"{(r['total_cost_p'] - baseline_p) / 100.0:+.2f}"
+                        if baseline_p is not None else "unavailable")
+            marker = " <<" if r["tariff_key"] == "tracker" else ""
+            if r.get("illustrative"):
+                marker += " (illustrative, not ranked)"
             log(f"[Compare] {r['tariff_name']:<35} GBP{total_gbp:>6.2f}  "
                 f"{diff_str:>12}  {r.get('own_coverage_pct', r['coverage_pct']):>5.0f}%{marker}")
         for r in results:

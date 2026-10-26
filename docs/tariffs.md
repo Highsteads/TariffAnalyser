@@ -5,7 +5,7 @@ nav_order: 4
 
 # The tariffs it compares
 
-The Octopus tariffs use real prices. The first row uses the price SigenEnergyManager recorded for each half-hour, which is the price you actually paid. Agile, Go, Cosy, Flux and Economy 7 use the prices Octopus published for your region, as they stood on each day of the period, so a price change part way through is counted from the moment it happened. The Ofgem cap and the fixed deals from other suppliers use typical prices written into the plugin, last checked on 2 May 2026. Treat those as a guide, not as your exact contract — the report prints the date they were checked.
+The Octopus tariffs use real prices. The first row uses the price SigenEnergyManager recorded for each half-hour, which is the price you actually paid. Agile, Go, Cosy, Flux and Economy 7 use the prices Octopus published for your region, as they stood on each day of the period, so a price change part way through is counted from the moment it happened. The Ofgem cap and the fixed deals from other suppliers use typical prices written into the plugin, last checked on 2 May 2026. They remain visible as unranked examples, not as your exact contract — the report prints the date they were checked.
 
 The standing charges are real for every Octopus tariff. The first row uses the standing charge SigenEnergyManager recorded for each day, and the other Octopus tariffs use the standing charge Octopus publishes for your region, day by day.
 

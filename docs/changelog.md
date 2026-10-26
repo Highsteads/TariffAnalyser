@@ -7,6 +7,16 @@ nav_order: 10
 
 The newest version is at the top.
 
+## 1.13 - 26 October 2026
+
+- Standing charges use the covered elapsed time within each UK calendar day. A complete 23-hour or 25-hour day costs one daily charge; gaps and overlaps no longer become whole extra half-hours.
+- Illustrative fixed-supplier and price-cap examples remain visible but are not ranked or highlighted as the cheapest tariff.
+- Reports explain that battery operation stays unchanged, so the cost order is not a recommendation to switch tariffs. Eligibility and export compatibility still need checking.
+- Missing readings and missing prices are shown separately. Clock-change timestamps without offsets are flagged because their exact timing cannot be recovered.
+- No tariff is ranked at zero cost when its priced records have no overlap with the others. Comparisons without an actual-cost baseline say it is unavailable.
+- Removed the comparison's self-sufficiency percentage: grid import includes battery charging, so subtracting it from home use did not measure self-sufficiency.
+- Existing action IDs, settings, report filenames, comparison result keys and the shared daily-summary database remain compatible. Import and export energy calculations are unchanged for existing naive timestamps.
+
 ## 1.12 — 5 October 2026
 
 The prices in the comparison are now Octopus's own, and the Energy Summary keeps solar and grid-charged battery energy apart.
